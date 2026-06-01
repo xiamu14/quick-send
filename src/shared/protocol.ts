@@ -13,6 +13,7 @@ export type ClientEvent =
         previewDataUrl?: string;
       };
     }
+  | { type: "message:delete"; messageId: string }
   | { type: "transfer:receive"; offerId: string }
   | { type: "transfer:complete"; offerId: string }
   | { type: "transfer:fail"; offerId: string }
@@ -24,6 +25,7 @@ export type ServerEvent =
   | { type: "peer:self"; peer: Peer }
   | { type: "peer:list"; peers: Peer[] }
   | { type: "message:created"; message: ChatMessage; tempId?: string }
+  | { type: "message:deleted"; messageId: string }
   | { type: "file-offer:updated"; offer: FileOffer }
   | { type: "transfer:locked"; offer: FileOffer; senderPeerId: string; receiverPeerId: string }
   | { type: "transfer:busy"; offerId: string }
@@ -31,4 +33,3 @@ export type ServerEvent =
   | { type: "rtc:answer"; offerId: string; fromPeerId: string; sdp: RTCSessionDescriptionInit }
   | { type: "rtc:candidate"; offerId: string; fromPeerId: string; candidate: RTCIceCandidateInit }
   | { type: "error"; message: string };
-

@@ -59,3 +59,10 @@ input {
 .composer-icon-button:hover {
   color: oklch(58% 0.018 255);
 }
+
+.file-card-title {
+  max-width: min(44vw, 20rem);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -58,6 +58,12 @@ create index if not exists messages_created_at_idx on messages(created_at);
 create index if not exists file_offers_sender_status_idx on file_offers(sender_peer_id, status);
 `);
 
+db.exec(`
+update peers set last_ip = substr(last_ip, 8) where last_ip like '::ffff:%';
+update messages set sender_ip = substr(sender_ip, 8) where sender_ip like '::ffff:%';
+`);
+mergeDuplicatePeersByIp();
+
 export function getConfig(key: string) {
   return db.query<{ value: string }, [string]>("select value from config where key = ?").get(key)?.value;
 }
@@ -79,8 +85,19 @@ export function getOrCreateConfig(key: string, createValue: () => string) {
 
 export function upsertPeer(input: { id: string; ip: string; userAgent: string; nickname?: string }): Peer {
   const now = Date.now();
-  const existing = db.query<{ nickname: string }, [string]>("select nickname from peers where id = ?").get(input.id);
-  const nickname = existing?.nickname ?? input.nickname ?? nextNickname();
+  const existing = db
+    .query<{ id: string; nickname: string }, [string]>("select id, nickname from peers where id = ?")
+    .get(input.id);
+  const ipPeer = existing
+    ? undefined
+    : db
+        .query<{ id: string; nickname: string }, [string]>(
+          "select id, nickname from peers where last_ip = ? order by last_seen_at desc limit 1",
+        )
+        .get(input.ip);
+  const peerId = existing?.id ?? ipPeer?.id ?? input.id;
+  const nickname = existing?.nickname ?? ipPeer?.nickname ?? input.nickname ?? nextNickname();
+  mergePeersByIp(peerId, input.ip);
   db.query(`
     insert into peers(id, nickname, last_ip, user_agent, created_at, last_seen_at)
     values(?, ?, ?, ?, ?, ?)
@@ -88,8 +105,36 @@ export function upsertPeer(input: { id: string; ip: string; userAgent: string; n
       last_ip = excluded.last_ip,
       user_agent = excluded.user_agent,
       last_seen_at = excluded.last_seen_at
-  `).run(input.id, nickname, input.ip, input.userAgent, now, now);
-  return { id: input.id, nickname, ip: input.ip, userAgent: input.userAgent, online: true, lastSeenAt: now };
+  `).run(peerId, nickname, input.ip, input.userAgent, now, now);
+  return { id: peerId, nickname, ip: input.ip, userAgent: input.userAgent, online: true, lastSeenAt: now };
+}
+
+function mergePeersByIp(canonicalId: string, ip: string) {
+  const duplicates = db
+    .query<{ id: string }, [string, string]>("select id from peers where last_ip = ? and id != ?")
+    .all(ip, canonicalId);
+  if (!duplicates.length) return;
+  const tx = db.transaction(() => {
+    for (const peer of duplicates) {
+      db.query("update messages set sender_peer_id = ? where sender_peer_id = ?").run(canonicalId, peer.id);
+      db.query("update file_offers set sender_peer_id = ? where sender_peer_id = ?").run(canonicalId, peer.id);
+      db.query("update file_offers set receiver_peer_id = ? where receiver_peer_id = ?").run(canonicalId, peer.id);
+      db.query("delete from peers where id = ?").run(peer.id);
+    }
+  });
+  tx();
+}
+
+function mergeDuplicatePeersByIp() {
+  const duplicateIps = db
+    .query<{ last_ip: string }, []>("select last_ip from peers group by last_ip having count(*) > 1")
+    .all();
+  for (const item of duplicateIps) {
+    const canonical = db
+      .query<{ id: string }, [string]>("select id from peers where last_ip = ? order by last_seen_at desc limit 1")
+      .get(item.last_ip);
+    if (canonical) mergePeersByIp(canonical.id, item.last_ip);
+  }
 }
 
 export function touchPeer(id: string) {
@@ -206,6 +251,17 @@ export function updateFileOffer(id: string, patch: Partial<Pick<FileOffer, "stat
   return next;
 }
 
+export function deleteMessage(id: string) {
+  const row = db.query<{ file_offer_id: string | null }, [string]>("select file_offer_id from messages where id = ?").get(id);
+  if (!row) return false;
+  const tx = db.transaction(() => {
+    db.query("delete from messages where id = ?").run(id);
+    if (row.file_offer_id) db.query("delete from file_offers where id = ?").run(row.file_offer_id);
+  });
+  tx();
+  return true;
+}
+
 export function expireOffersForPeer(peerId: string) {
   const now = Date.now();
   const rows = db
@@ -217,6 +273,19 @@ export function expireOffersForPeer(peerId: string) {
     "update file_offers set status = 'sender_offline', updated_at = ? where sender_peer_id = ? and status in ('available', 'transferring')",
   ).run(now, peerId);
   return rows.map((row) => ({ ...mapOffer(row), status: "sender_offline" as const, updatedAt: now }));
+}
+
+export function expireStaleOffersForPeer(peerId: string) {
+  const now = Date.now();
+  const rows = db
+    .query<FileOfferRow, [string]>(
+      "select * from file_offers where sender_peer_id = ? and status in ('available', 'transferring')",
+    )
+    .all(peerId);
+  db.query(
+    "update file_offers set status = 'expired', updated_at = ? where sender_peer_id = ? and status in ('available', 'transferring')",
+  ).run(now, peerId);
+  return rows.map((row) => ({ ...mapOffer(row), status: "expired" as const, updatedAt: now }));
 }
 
 export function expireOldOffers() {

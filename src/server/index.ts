@@ -13,7 +13,9 @@ import { createSession, getAccessCode, hasSession, requireSession } from "./auth
 import {
   createFileMessage,
   createTextMessage,
+  deleteMessage,
   expireOffersForPeer,
+  expireStaleOffersForPeer,
   expireOldOffers,
   getFileOffer,
   getMessagesForDay,
@@ -178,6 +180,9 @@ function handleWsMessage(raw: string, ws: ServerWebSocket<PeerSocketData>, ip: s
 
   if (event.type === "peer:hello") {
     const peer = upsertPeer({ id: event.deviceId, ip, userAgent: event.userAgent || userAgent });
+    for (const offer of expireStaleOffersForPeer(peer.id)) {
+      broadcast({ type: "file-offer:updated", offer });
+    }
     registerPeer(peer, ws);
     ws.send(JSON.stringify({ type: "peer:self", peer }));
     broadcast({ type: "peer:list", peers: listOnlinePeers() });
@@ -210,6 +215,12 @@ function handleWsMessage(raw: string, ws: ServerWebSocket<PeerSocketData>, ip: s
         previewDataUrl: event.file.previewDataUrl,
       });
       broadcast({ type: "message:created", message, tempId: event.tempId });
+      return;
+    }
+    case "message:delete": {
+      if (deleteMessage(event.messageId)) {
+        broadcast({ type: "message:deleted", messageId: event.messageId });
+      }
       return;
     }
     case "transfer:receive": {
