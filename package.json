@@ -1,0 +1,40 @@
+{
+  "name": "quick-send",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "PORTLESS_LAN=1 PORTLESS_LAN_IP=${QUICK_LAN_IP:-192.168.1.9} PORTLESS_HTTPS=0 PORTLESS_PORT=1355 portless quick bun run dev:app",
+    "dev:app": "bun run build:web && bun run src/server/index.ts",
+    "build": "bun run build:web && tsc --noEmit",
+    "build:web": "vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@heroui/react": "^3.1.0",
+    "@heroui/styles": "^3.1.0",
+    "@hono/zod-validator": "^0.7.0",
+    "@tanstack/react-router": "^1.120.15",
+    "@tanstack/react-start": "^1.120.15",
+    "@vitejs/plugin-react": "^5.0.0",
+    "framer-motion": "^12.23.12",
+    "hono": "^4.9.6",
+    "lucide-react": "^0.542.0",
+    "qrcode": "^1.5.4",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-window": "^1.8.11",
+    "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.12",
+    "@tanstack/router-plugin": "^1.120.15",
+    "@types/bun": "^1.2.21",
+    "@types/qrcode": "^1.5.5",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@types/react-window": "^1.8.8",
+    "tailwindcss": "^4.1.12",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.3"
+  }
+}
