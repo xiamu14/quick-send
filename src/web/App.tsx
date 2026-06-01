@@ -67,7 +67,7 @@ function AccessCodeScreen({ onDone }: { onDone: () => void }) {
             onKeyDown={(event) => {
               if (event.key === "Enter") void join();
             }}
-            className="min-h-11 flex-1 rounded-2xl border border-default-200 bg-[oklch(99%_0.004_255)] px-4 text-sm outline-none focus:border-primary"
+            className="min-h-11 flex-1 rounded-2xl border border-default-200 bg-white px-4 text-sm outline-none focus:border-primary"
           />
           <Button variant="primary" onPress={join}>
             Join
@@ -238,7 +238,7 @@ function ChatApp() {
   }
 
   return (
-    <main className="fixed inset-0 flex flex-col overflow-hidden bg-[oklch(97.5%_0.007_255)]">
+    <main className="fixed inset-0 flex flex-col overflow-hidden bg-white">
       <TopBar self={self} peers={peers} publicUrl={publicUrl} qr={qr} />
       <section className="mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col overflow-hidden">
         <div className="min-h-0 flex-1 px-4 sm:px-6">
@@ -278,7 +278,7 @@ function ChatApp() {
 
 function TopBar({ self, peers, publicUrl, qr }: { self: Peer | null; peers: Peer[]; publicUrl: string; qr: string }) {
   return (
-    <header className="border-b border-default-200 bg-[oklch(99%_0.004_255)] px-4 py-3">
+    <header className="border-b border-default-200 bg-white px-4 py-3">
       <div className="mx-auto flex max-w-4xl items-center justify-between gap-3">
         <div>
           <div className="text-xl font-semibold text-default-900">Quick Send</div>
@@ -492,7 +492,7 @@ function MessageBubble({
             className={`max-w-full whitespace-pre-wrap rounded-2xl px-4 py-3 text-left text-[15px] leading-6 shadow-sm transition-transform active:scale-[0.99] ${
               isSelf
                 ? "rounded-br-md bg-[var(--quick-primary)] text-white"
-                : "rounded-bl-md bg-[oklch(99%_0.004_255)] text-default-900"
+                : "rounded-bl-md bg-white text-default-900"
             }`}
           >
             {message.body}
@@ -521,7 +521,7 @@ function FileCard({
   const canReceive = !isSelf && offer.status === "available" && offer.expiresAt > Date.now();
   const label = statusLabel(offer);
   return (
-    <div className="w-72 overflow-hidden rounded-2xl border border-default-200 bg-[oklch(99%_0.004_255)] shadow-sm">
+    <div className="w-72 overflow-hidden rounded-2xl border border-default-200 bg-white shadow-sm">
       {offer.previewDataUrl && <img alt="" className="max-h-56 w-full object-cover" src={offer.previewDataUrl} />}
       <div className="space-y-3 p-3">
         <div className="flex items-center gap-3">
@@ -563,10 +563,10 @@ function Composer({ onSend, onFile, onImage }: { onSend: (body: string) => void;
   }
   return (
     <footer
-      className="bg-[oklch(99%_0.004_255)] px-3 pt-2 sm:px-6"
+      className="bg-white px-3 pt-2 sm:px-6"
       style={{ paddingBottom: "calc(10px + env(safe-area-inset-bottom))" }}
     >
-      <div className="relative mx-auto max-w-4xl rounded-lg border-2 border-[var(--quick-primary)] bg-[oklch(99%_0.004_255)] shadow-sm">
+      <div className="relative mx-auto max-w-4xl rounded-lg border-2 border-[var(--quick-primary)] bg-white shadow-sm">
         <textarea
           value={body}
           onChange={(event) => setBody(event.target.value)}
