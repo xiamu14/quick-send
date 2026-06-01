@@ -260,6 +260,11 @@ function ChatApp() {
     send({ type: "message:text:create", body, tempId: createClientId() });
   }
 
+  async function copyMessageText(text: string) {
+    await copyText(text);
+    setNotice({ text: "Copied", tone: "success" });
+  }
+
   async function chooseFile(file: File | undefined) {
     if (!file) return;
     const tempId = createClientId();
@@ -327,6 +332,7 @@ function ChatApp() {
             onDelete={(messageId) =>
               send({ type: "message:delete", messageId })
             }
+            onCopy={copyMessageText}
           />
         </div>
         <ToastSlot notice={notice} />
@@ -469,6 +475,7 @@ const Timeline = function Timeline(
     onLoadEarlier,
     onReceive,
     onDelete,
+    onCopy,
   }: {
     items: TimelineItem[];
     selfId?: string;
@@ -478,6 +485,7 @@ const Timeline = function Timeline(
     onLoadEarlier: () => void;
     onReceive: (offerId: string) => void;
     onDelete: (messageId: string) => void;
+    onCopy: (text: string) => void | Promise<void>;
   },
   ref: React.Ref<VariableSizeList<any>>,
 ) {
@@ -499,8 +507,16 @@ const Timeline = function Timeline(
     [ref],
   );
   const itemData = useMemo(
-    () => ({ items, selfId, progress, onReceive, onDelete, setRowHeight }),
-    [items, selfId, progress, onReceive, onDelete, setRowHeight],
+    () => ({
+      items,
+      selfId,
+      progress,
+      onReceive,
+      onDelete,
+      onCopy,
+      setRowHeight,
+    }),
+    [items, selfId, progress, onReceive, onDelete, onCopy, setRowHeight],
   );
 
   useEffect(() => {
@@ -552,6 +568,7 @@ const Timeline = function Timeline(
     onLoadEarlier: () => void;
     onReceive: (offerId: string) => void;
     onDelete: (messageId: string) => void;
+    onCopy: (text: string) => void | Promise<void>;
   } & React.RefAttributes<VariableSizeList<any>>
 >;
 
@@ -568,6 +585,7 @@ function Row({
     progress: Record<string, number>;
     onReceive: (offerId: string) => void;
     onDelete: (messageId: string) => void;
+    onCopy: (text: string) => void | Promise<void>;
     setRowHeight: (index: number, height: number) => void;
   };
 }) {
@@ -608,6 +626,7 @@ function Row({
           }
           onReceive={data.onReceive}
           onDelete={data.onDelete}
+          onCopy={data.onCopy}
         />
       </div>
     </div>
@@ -620,13 +639,17 @@ function MessageBubble({
   progress,
   onReceive,
   onDelete,
+  onCopy,
 }: {
   message: ChatMessage;
   isSelf: boolean;
   progress?: number;
   onReceive: (offerId: string) => void;
   onDelete: (messageId: string) => void;
+  onCopy: (text: string) => void | Promise<void>;
 }) {
+  const [copyPulse, setCopyPulse] = useState(0);
+
   return (
     <div className={`flex ${isSelf ? "justify-end" : "justify-start"}`}>
       <div
@@ -640,17 +663,22 @@ function MessageBubble({
             : (message.senderNickname ?? message.senderPeerId.slice(0, 8))}
         </div>
         {message.kind === "text" ? (
-          <button
+          <motion.button
             title="Copy"
-            onClick={() => copyText(message.body ?? "")}
-            className={`max-w-full whitespace-pre-wrap rounded-2xl px-4 py-3 text-left text-[15px] leading-6 shadow-sm transition-transform active:scale-[0.99] ${
+            animate={copyPulse ? { scale: [1, 1.04, 0.98, 1] } : { scale: 1 }}
+            transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+            onClick={() => {
+              setCopyPulse((current) => current + 1);
+              void onCopy(message.body ?? "");
+            }}
+            className={`max-w-full whitespace-pre-wrap rounded-2xl px-4 py-3 text-left text-[15px] leading-6 shadow-sm ${
               isSelf
                 ? " bg-(--quick-primary) text-white"
                 : " bg-white text-default-900"
             }`}
           >
             {message.body}
-          </button>
+          </motion.button>
         ) : (
           message.fileOffer && (
             <FileCard
