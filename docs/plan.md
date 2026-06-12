@@ -17,7 +17,7 @@ Use portless for LAN routing:
 
 ```bash
 portless proxy start --lan --no-tls -p 1355
-portless quick bun run dev:app
+PORTLESS_LAN=1 PORTLESS_HTTPS=0 PORTLESS_PORT=1355 portless quick bun run dev:app
 ```
 
 The app listens on `process.env.PORT`. It must not bind to `1355` directly.

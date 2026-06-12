@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "PORTLESS_LAN=1 PORTLESS_LAN_IP=${QUICK_LAN_IP:-192.168.1.9} PORTLESS_HTTPS=0 PORTLESS_PORT=1355 portless quick bun run dev:app",
+    "dev": "PORTLESS_LAN=1 PORTLESS_HTTPS=0 PORTLESS_PORT=1355 portless quick bun run dev:app",
     "dev:app": "bun run build:web && bun run src/server/index.ts",
     "build": "bun run build:web && tsc --noEmit",
     "build:web": "vite build",
