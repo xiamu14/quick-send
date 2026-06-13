@@ -1,35 +1,84 @@
-import type { ChatMessage, FileOffer, Peer } from "./types";
+import { type } from "arktype";
+import type { ChatMessage, FileOffer, RoomSummary } from "./types";
 
-export type ClientEvent =
-  | { type: "peer:hello"; deviceId: string; userAgent: string }
-  | { type: "message:text:create"; body: string; tempId?: string }
-  | {
-      type: "message:file:create";
-      tempId: string;
-      file: {
-        name: string;
-        size: number;
-        mime: string;
-        previewDataUrl?: string;
-      };
-    }
-  | { type: "message:delete"; messageId: string }
-  | { type: "transfer:receive"; offerId: string }
-  | { type: "transfer:complete"; offerId: string }
-  | { type: "transfer:fail"; offerId: string }
-  | { type: "rtc:offer"; offerId: string; toPeerId: string; sdp: RTCSessionDescriptionInit }
-  | { type: "rtc:answer"; offerId: string; toPeerId: string; sdp: RTCSessionDescriptionInit }
-  | { type: "rtc:candidate"; offerId: string; toPeerId: string; candidate: RTCIceCandidateInit };
+export const messageCreateSchema = type({
+  roomId: "string",
+  clientMessageId: "string",
+  body: "string",
+});
 
-export type ServerEvent =
-  | { type: "peer:self"; peer: Peer }
-  | { type: "peer:list"; peers: Peer[] }
-  | { type: "message:created"; message: ChatMessage; tempId?: string }
-  | { type: "message:deleted"; messageId: string }
-  | { type: "file-offer:updated"; offer: FileOffer }
-  | { type: "transfer:locked"; offer: FileOffer; senderPeerId: string; receiverPeerId: string }
-  | { type: "transfer:busy"; offerId: string }
-  | { type: "rtc:offer"; offerId: string; fromPeerId: string; sdp: RTCSessionDescriptionInit }
-  | { type: "rtc:answer"; offerId: string; fromPeerId: string; sdp: RTCSessionDescriptionInit }
-  | { type: "rtc:candidate"; offerId: string; fromPeerId: string; candidate: RTCIceCandidateInit }
-  | { type: "error"; message: string };
+export const fileCreateSchema = type({
+  roomId: "string",
+  clientMessageId: "string",
+  file: {
+    name: "string",
+    size: "number",
+    mime: "string",
+    "previewDataUrl?": "string",
+  },
+});
+
+export const transferReceiveSchema = type({
+  roomId: "string",
+  offerId: "string",
+});
+
+export const transferStatusSchema = type({
+  roomId: "string",
+  offerId: "string",
+});
+
+export const rtcSchema = type({
+  roomId: "string",
+  offerId: "string",
+  toUserId: "string",
+  payload: "unknown",
+});
+
+export type SocketAck<T = undefined> =
+  | { ok: true; data?: T }
+  | { ok: false; error: { code: string; message: string } };
+
+export type ServerToClientEvents = {
+  "room:summary": (summary: RoomSummary) => void;
+  "room:deleted": (payload: { roomId: string }) => void;
+  "join-request:changed": (payload: { roomId: string }) => void;
+  "message:created": (message: ChatMessage) => void;
+  "file-offer:updated": (offer: FileOffer) => void;
+  "transfer:locked": (payload: {
+    offer: FileOffer;
+    senderUserId: string;
+    receiverUserId: string;
+  }) => void;
+  "rtc:offer": (payload: RtcServerPayload) => void;
+  "rtc:answer": (payload: RtcServerPayload) => void;
+  "rtc:candidate": (payload: RtcServerPayload) => void;
+  "identity:revoked": () => void;
+};
+
+export type ClientToServerEvents = {
+  "message:create": (
+    payload: typeof messageCreateSchema.infer,
+    ack: (result: SocketAck<ChatMessage>) => void
+  ) => void;
+  "file:create": (
+    payload: typeof fileCreateSchema.infer,
+    ack: (result: SocketAck<ChatMessage>) => void
+  ) => void;
+  "transfer:receive": (
+    payload: typeof transferReceiveSchema.infer,
+    ack: (result: SocketAck<FileOffer>) => void
+  ) => void;
+  "transfer:complete": (payload: typeof transferStatusSchema.infer) => void;
+  "transfer:fail": (payload: typeof transferStatusSchema.infer) => void;
+  "rtc:offer": (payload: typeof rtcSchema.infer) => void;
+  "rtc:answer": (payload: typeof rtcSchema.infer) => void;
+  "rtc:candidate": (payload: typeof rtcSchema.infer) => void;
+};
+
+export type RtcServerPayload = {
+  roomId: string;
+  offerId: string;
+  fromUserId: string;
+  payload: unknown;
+};

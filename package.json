@@ -1,31 +1,28 @@
 {
-  "name": "quick-send",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "dev": "PORTLESS_LAN=1 PORTLESS_HTTPS=0 PORTLESS_PORT=1355 portless quick bun run dev:app",
-    "dev:app": "bun run build:web && bun run src/server/index.ts",
-    "build": "bun run build:web && tsc --noEmit",
-    "build:web": "vite build",
-    "typecheck": "tsc --noEmit"
-  },
   "dependencies": {
     "@heroui/react": "^3.1.0",
     "@heroui/styles": "^3.1.0",
-    "@hono/zod-validator": "^0.7.0",
+    "@hono/node-server": "^2.0.4",
+    "@oslojs/encoding": "^1.1.0",
+    "@oslojs/otp": "^1.1.0",
     "@tanstack/react-router": "^1.120.15",
     "@tanstack/react-start": "^1.120.15",
     "@vitejs/plugin-react": "^5.0.0",
+    "arktype": "^2.2.0",
     "framer-motion": "^12.23.12",
     "hono": "^4.9.6",
+    "jotai": "^2.20.1",
     "lucide-react": "^0.542.0",
     "qrcode": "^1.5.4",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-window": "^1.8.11",
-    "zod": "^4.1.5"
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3",
+    "sonner": "^2.0.7"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.4.16",
     "@tailwindcss/vite": "^4.1.12",
     "@tanstack/router-plugin": "^1.120.15",
     "@types/bun": "^1.2.21",
@@ -33,8 +30,27 @@
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@types/react-window": "^1.8.8",
+    "hostc": "1.3.0",
+    "lefthook": "^2.1.9",
     "tailwindcss": "^4.1.12",
     "typescript": "^5.9.2",
+    "ultracite": "7.8.3",
+    "uqr": "0.1.3",
     "vite": "^7.1.3"
-  }
+  },
+  "name": "quick-send",
+  "scripts": {
+    "dev": "bun run src/dev.ts",
+    "dev:app": "bun run build:web && bun run src/server/index.ts",
+    "build": "bun run build:web && bun run typecheck",
+    "build:web": "vite build",
+    "typecheck": "tsc --noEmit",
+    "check": "ultracite check",
+    "check:fix": "ultracite fix",
+    "keygen": "bun run src/server/keygen.ts",
+    "prepare": "lefthook install",
+    "test": "bun test"
+  },
+  "type": "module",
+  "private": true
 }

@@ -1,4 +1,5 @@
-import { Outlet, createRootRoute } from "@tanstack/react-router";
+import { createRootRoute, Outlet } from "@tanstack/react-router";
+import { Toaster } from "sonner";
 import "../web/styles.css";
 
 export const Route = createRootRoute({
@@ -6,5 +7,10 @@ export const Route = createRootRoute({
 });
 
 function Root() {
-  return <Outlet />;
+  return (
+    <>
+      <Outlet />
+      <Toaster position="top-center" richColors />
+    </>
+  );
 }

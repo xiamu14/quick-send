@@ -1,120 +1,213 @@
-# Quick Send MVP Plan
+# Quick Send Product and Technical Plan
 
-## Scope
+## Product
 
-Quick Send is a LAN-only web file transfer assistant. One machine runs the server, other devices open the web UI from the same local network.
+Quick Send is a LAN-only room chat and direct file-transfer web app. One device
+runs the Bun service. Other devices on the same LAN open its Portless HTTPS URL.
 
-- Entry URL: `http://quick.local:1355`
-- Runtime: Bun + Hono + TanStack Router SPA + SQLite
-- UI: HeroUI, single chat window
-- Transport: WebSocket for control, WebRTC DataChannel for file bytes
-- Storage: text history, file metadata, image thumbnail only
-- Non-goal: public internet access, server file relay, large file optimization, PWA
-
-## Runtime
-
-Use portless for LAN routing:
-
-```bash
-portless proxy start --lan --no-tls -p 1355
-PORTLESS_LAN=1 PORTLESS_HTTPS=0 PORTLESS_PORT=1355 portless quick bun run dev:app
-```
-
-The app listens on `process.env.PORT`. It must not bind to `1355` directly.
-
-The web client is built as a plain SPA. This avoids a prerendered shell dependency during LAN development.
+- UI: React 19, TanStack Router, HeroUI, Tailwind CSS v4, Jotai
+- API: Hono REST + Socket.IO over WebSocket only
+- Storage: SQLite on the service device
+- File bytes: WebRTC DataChannel, never relayed or stored by the service
+- Text and file metadata: stored as plaintext in SQLite
+- Language: English, light theme, mobile-first with a two-column desktop layout
 
 ## Identity
 
-Each browser creates a persistent `deviceId` in localStorage. The server stores:
+Every device maps to one user and every user has one active device credential.
 
-- `deviceId`
-- IP
-- nickname
-- user agent
-- last seen time
+Registration:
 
-UI shows a friendly English noun nickname, not technical IDs.
+1. Choose a unique username.
+2. Scan a TOTP QR code (`SHA-1`, 6 digits, 30 seconds).
+3. Confirm one valid code.
+4. Receive one single-use recovery code formatted `XXXX-XXXX-XXXX`.
 
-## Chat
+The TOTP secret is encrypted with AES-GCM using the required
+`IDENTITY_ENCRYPTION_KEY`. Session and recovery tokens are stored as SHA-256
+hashes. A Secure, HttpOnly, SameSite=Strict cookie contains the session token.
 
-There is one shared chatbox.
+Device migration uses username plus either TOTP or the recovery code. A
+successful migration revokes the old credential and closes its sockets. The
+recovery code is consumed and can be regenerated from the active device after
+TOTP verification. Credentials expire after 90 days without activity.
 
-- Current device messages align right
-- Other device messages align left
-- Text messages are persisted in SQLite
-- File messages persist metadata only
-- Image messages persist a small thumbnail preview
+## Rooms
 
-History loads today by default. `Load earlier` prepends messages from earlier dates, up to the latest 7 days. Empty dates are skipped. There is no infinite scroll.
+- A user can own at most 5 rooms.
+- A room can have at most 10 members including its creator.
+- Room names are chosen randomly from 20 built-in English nouns.
+- A creator's active rooms do not reuse the same name.
+- Different creators may have rooms with the same name.
+- Rooms are discoverable by default.
+- The creator can permanently delete a room after typing its name.
+- Member removal, leaving, ownership transfer, renaming, hiding and archive are
+  outside MVP scope.
 
-## Files
+The home page lists every room the user owns or has joined, ordered by latest
+message time or creation time. It shows the last message summary, activity time,
+online member count, owner marker and pending request count for owned rooms.
+There is no unread model.
 
-File content never reaches the server.
+## Join Requests
 
-Flow:
+Discover returns every active room the user can request to join. Joined,
+pending and full rooms are omitted. Creator online status is shown.
 
-1. Sender chooses a file
-2. Client sends file metadata to server
-3. Server broadcasts the file offer
-4. Receiver clicks Receive
-5. Server locks the offer
-6. Sender and receiver exchange WebRTC signaling over WebSocket
-7. Sender streams chunks over DataChannel
-8. Receiver assembles a Blob and downloads it
+- At most 5 pending requests per user.
+- One pending request per user and room.
+- Requests expire after 7 days.
+- Rejected requests may be submitted again after 60 seconds.
+- Requests persist while the creator is offline.
+- The creator can approve or reject from home or room info.
+- Pending users cannot enter chat or read history.
+- Approved users can read the complete room history.
 
-Limits:
+## Messages
 
-- Sender page must stay open
-- One active transfer per sender
-- One active transfer per receiver
-- No relay fallback
-- No background transfer
-- No folder transfer
-- No drag and drop or paste upload in MVP
+- Text limit: 8 KB UTF-8.
+- File limit: 500 MB.
+- Image preview limit: 200 KB, longest edge 640 px.
+- Messages persist until the room is deleted.
+- No message deletion, edit, read receipt, typing state, search, pin or forward.
+- History uses an opaque `(createdAt, id)` cursor, 50 messages per request.
+- Earlier history loads only when the user presses `Load earlier`.
+- `clientMessageId` makes message creation idempotent per user.
 
-File offers expire after 30 minutes, or immediately when the sender leaves. Cross-day file records show as expired.
+## File Transfer
 
-## Auth
+File metadata creates a 30-minute offer. The sender tab keeps the `File` object
+in memory. Refresh, disconnect, service restart or room deletion makes its
+offers unavailable.
 
-MVP uses a lightweight access code.
+- LAN host ICE candidates only; no STUN, TURN or server relay.
+- One active transfer per sender and receiver.
+- One offer may be downloaded by multiple members sequentially.
+- The sender tab must remain online.
+- Transfer progress updates at most every 100 ms.
+- There is no cancel button or transfer queue.
+- Failed transfers can be retried while the offer remains available.
+- Completed files download automatically and can be downloaded again.
 
-- `ACCESS_CODE` can be set by env
-- Otherwise server generates one and stores it in SQLite config
-- Login creates an httpOnly session cookie
-- Session TTL: 7 days
-- REST and WebSocket require auth
+## SQLite
+
+The database enables WAL and foreign keys. Versioned TypeScript migrations run
+inside transactions. Migration 1 removes the old single-room schema.
+
+Tables:
+
+- `schema_migrations`
+- `users`
+- `credentials`
+- `recovery_codes`
+- `rooms`
+- `room_members`
+- `join_requests`
+- `messages`
+- `file_offers`
+- `audit_logs`
+
+Room-owned rows use foreign keys with `ON DELETE CASCADE`. Audit rows retain a
+room name snapshot and set `room_id` to null after deletion.
+
+## REST
+
+- `POST /api/identity/register/start`
+- `POST /api/identity/register/confirm`
+- `POST /api/identity/recover/start`
+- `POST /api/identity/recover/confirm`
+- `POST /api/identity/recovery-code`
+- `GET /api/bootstrap`
+- `GET /api/discover`
+- `POST /api/rooms`
+- `GET /api/rooms/:roomId`
+- `DELETE /api/rooms/:roomId`
+- `POST /api/rooms/:roomId/requests`
+- `POST /api/requests/:requestId/approve`
+- `POST /api/requests/:requestId/reject`
+- `GET /api/rooms/:roomId/messages`
+
+Errors use `{ "error": { "code": string, "message": string } }`. Request and
+response boundaries use ArkType. Mutations are not retried automatically.
+
+## Socket.IO
+
+Socket.IO uses only the default namespace and WebSocket transport. The
+credential cookie and Origin are validated during connection.
+
+Server rooms:
+
+- `user:{userId}`
+- `room:{roomId}`
+
+Core client events:
+
+- `message:create`
+- `file:create`
+- `transfer:receive`
+- `transfer:complete`
+- `transfer:fail`
+- `rtc:offer`
+- `rtc:answer`
+- `rtc:candidate`
+
+Core server events:
+
+- `room:summary`
+- `room:deleted`
+- `join-request:created`
+- `join-request:resolved`
+- `message:created`
+- `file-offer:updated`
+- `transfer:locked`
+- `rtc:offer`
+- `rtc:answer`
+- `rtc:candidate`
+
+Socket.IO handles heartbeat, timeout and reconnect. On reconnect the client
+reloads bootstrap and the current room rather than relying on missed events.
+Every event is authorized against SQLite membership; Socket.IO rooms are only a
+delivery optimization.
+
+## Security and Operations
+
+- Portless LAN HTTPS is required.
+- Each client device must trust the Portless CA.
+- Origin validation applies to REST mutations and Socket.IO.
+- Hono secure headers use a same-origin CSP.
+- Verification is limited by `IP + username`: 5 failures lock for 5 minutes;
+  each IP is limited to 20 attempts per minute.
+- Logs never include credentials, OTP values, message text, filenames or full
+  user agents.
+- A process lock prevents two service instances from sharing one database.
+- SIGINT and SIGTERM close Socket.IO, checkpoint WAL, close SQLite and release
+  the process lock.
 
 ## UI
 
-Keep the UI quiet and direct.
+The chat view follows the supplied reference: blue outgoing bubbles, white
+incoming bubbles, device-colored sender icons, a compact header and bottom
+composer. The second reference supplies the pale blue background, rounded cards
+and blue primary actions.
 
-Primary surfaces:
+HeroUI provides UI primitives. Tailwind CSS v4 utilities provide layout and
+styling; no custom CSS classes or custom primitive library. Lucide supplies
+icons. Sonner supplies global Toast. Motion supplies 120-180 ms interaction and
+mobile navigation animation while respecting reduced motion.
 
-- Top bar: app name, current nickname, online peers, QR
-- Timeline: virtualized chat items
-- Composer: image button, file button, text input, send button
-- Access code screen
+Desktop uses a room list sidebar and chat content. Mobile navigates between the
+room list and chat. Message rendering remains virtualized with `react-window`.
 
-Short status labels:
+## Quality Gates
 
-- Ready
-- Sending
-- Sent
-- Receive
-- Cancel
-- Retry
-- Expired
-- Sender left
-- Busy
+Every commit and CI run must pass:
 
-## Implementation Phases
+```bash
+bun run check
+bun test
+bun run typecheck
+bun run build
+```
 
-1. Project setup and build scripts
-2. SQLite schema and bootstrap API
-3. Auth and session
-4. WebSocket peer registry and message broadcast
-5. Chat UI and history loading
-6. File offer UI
-7. WebRTC transfer
-8. QR code and portless URL polish
+Lefthook runs the complete gate before commit. Tests use `bun:test` and
+temporary SQLite files. Browser E2E is outside scope.

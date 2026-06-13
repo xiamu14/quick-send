@@ -1,27 +1,75 @@
-export type Peer = {
+export type DeviceKind = "desktop" | "mobile" | "tablet";
+
+export type User = {
   id: string;
-  nickname: string;
-  ip: string;
-  userAgent: string;
-  online: boolean;
-  lastSeenAt: number;
+  username: string;
+  avatarSeed: string;
+  deviceKind: DeviceKind;
+  createdAt: number;
 };
 
-export type MessageKind = "text" | "file";
+export type RoomSummary = {
+  id: string;
+  name: string;
+  creatorId: string;
+  creatorUsername: string;
+  isOwner: boolean;
+  onlineCount: number;
+  memberCount: number;
+  pendingCount: number;
+  lastMessage?: string;
+  lastActivityAt: number;
+  createdAt: number;
+};
+
+export type DiscoverRoom = {
+  id: string;
+  name: string;
+  creatorUsername: string;
+  creatorOnline: boolean;
+  memberCount: number;
+  createdAt: number;
+};
+
+export type JoinRequest = {
+  id: string;
+  roomId: string;
+  roomName: string;
+  requesterId: string;
+  requesterUsername: string;
+  requesterDeviceKind: DeviceKind;
+  status: "pending" | "approved" | "rejected" | "expired";
+  createdAt: number;
+};
+
+export type RoomMember = User & {
+  online: boolean;
+  isCreator: boolean;
+};
+
+export type RoomDetail = {
+  id: string;
+  name: string;
+  creatorId: string;
+  creatorUsername: string;
+  createdAt: number;
+  membership: "member" | "pending" | "none";
+  members: RoomMember[];
+  pendingRequests: JoinRequest[];
+};
 
 export type FileOfferStatus =
   | "available"
   | "transferring"
-  | "done"
-  | "cancelled"
-  | "failed"
   | "expired"
   | "sender_offline";
 
 export type FileOffer = {
   id: string;
-  senderPeerId: string;
-  receiverPeerId?: string;
+  roomId: string;
+  senderUserId: string;
+  senderSocketId: string;
+  receiverUserId?: string;
   name: string;
   size: number;
   mime: string;
@@ -34,25 +82,30 @@ export type FileOffer = {
 
 export type ChatMessage = {
   id: string;
-  kind: MessageKind;
-  senderPeerId: string;
-  senderNickname?: string;
-  senderIp: string;
+  roomId: string;
+  kind: "text" | "file";
+  senderUserId: string;
+  senderUsername: string;
+  senderAvatarSeed: string;
+  senderDeviceKind: DeviceKind;
   body?: string;
-  fileOfferId?: string;
   fileOffer?: FileOffer;
   createdAt: number;
 };
 
-export type TimelineItem =
-  | { type: "date"; id: string; label: string }
-  | { type: "message"; id: string; message: ChatMessage };
-
 export type BootstrapPayload = {
-  self: Peer;
-  peers: Peer[];
+  user: User;
+  rooms: RoomSummary[];
+  pendingRequests: JoinRequest[];
+  limits: {
+    maxOwnedRooms: number;
+    maxRoomMembers: number;
+    maxPendingRequests: number;
+    maxFileBytes: number;
+  };
+};
+
+export type MessagePage = {
   messages: ChatMessage[];
-  hasEarlierMessages: boolean;
-  publicUrl: string;
-  accessCode?: string;
+  nextCursor?: string;
 };
