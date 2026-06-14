@@ -7,7 +7,7 @@ bytes move directly between browsers over WebRTC DataChannel.
 ## Requirements
 
 - Bun 1.3+
-- Internet access for the hostc tunnel
+- Internet access when using the hostc tunnel
 - Devices on the same local network for direct file transfer
 
 ## Setup
@@ -33,16 +33,27 @@ IDENTITY_ENCRYPTION_KEY=<generated Base64 key>
 Keep this key with database backups. Existing authenticator identities cannot
 be verified if it is lost.
 
-## Public HTTPS tunnel
+## Development
 
-Run Quick Send:
+Start the Bun API server and Vite dev server with hot reload:
 
 ```bash
 bun run dev
 ```
 
-The dev script starts the local Bun server on port `4173`, then hostc prints a
-temporary public HTTPS URL such as:
+Open the Vite URL printed in the terminal. Development mode does not start
+hostc.
+
+## Public HTTPS tunnel
+
+Build and run Quick Send with hostc:
+
+```bash
+bun run start
+```
+
+The start script builds the web app, starts the local Bun server on port
+`4173`, then hostc prints a temporary public HTTPS URL such as:
 
 ```text
 https://t-a1b2c3d4.hostc.dev

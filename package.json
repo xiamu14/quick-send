@@ -41,7 +41,8 @@
   "name": "quick-send",
   "scripts": {
     "dev": "bun run src/dev.ts",
-    "dev:app": "bun run build:web && bun run src/server/index.ts",
+    "start": "bun run src/start.ts",
+    "start:app": "bun run build:web && bun run src/server/index.ts",
     "build": "bun run build:web && bun run typecheck",
     "build:web": "vite build",
     "typecheck": "tsc --noEmit",

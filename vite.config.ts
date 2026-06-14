@@ -1,8 +1,31 @@
+import type { ClientRequest, IncomingMessage } from "node:http";
 import { fileURLToPath, URL } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react from "@vitejs/plugin-react";
-import { defineConfig } from "vite";
+import { defineConfig, type ProxyOptions } from "vite";
+
+const serverPort = Number(process.env.QUICK_SEND_PORT ?? 4173);
+const serverTarget = `http://127.0.0.1:${serverPort}`;
+
+function proxyOptions(options: ProxyOptions = {}): ProxyOptions {
+  return {
+    target: serverTarget,
+    ...options,
+    configure(proxy) {
+      const preserveHost = (
+        proxyRequest: ClientRequest,
+        request: IncomingMessage
+      ) => {
+        if (request.headers.host) {
+          proxyRequest.setHeader("x-forwarded-host", request.headers.host);
+        }
+      };
+      proxy.on("proxyReq", preserveHost);
+      proxy.on("proxyReqWs", preserveHost);
+    },
+  };
+}
 
 export default defineConfig({
   build: {
@@ -11,6 +34,15 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
+    },
+  },
+  server: {
+    host: "0.0.0.0",
+    proxy: {
+      "/api": proxyOptions(),
+      "/socket.io": proxyOptions({
+        ws: true,
+      }),
     },
   },
   plugins: [tailwindcss(), tanstackRouter(), react()],

@@ -313,7 +313,8 @@ app.get("/api/rooms/:roomId/messages", (context) =>
 );
 
 app.use("/assets/*", serveStatic({ root: clientRoot }));
-app.get("/favicon.ico", serveStatic({ path: join(clientRoot, "favicon.ico") }));
+app.get("/favicon.svg", serveStatic({ path: join(clientRoot, "favicon.svg") }));
+app.get("/favicon.ico", (context) => context.redirect("/favicon.svg", 308));
 app.get("*", async (context) => {
   const indexPath = existsSync(join(clientRoot, "_shell.html"))
     ? join(clientRoot, "_shell.html")

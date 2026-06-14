@@ -12,15 +12,15 @@ import { motion } from "framer-motion";
 import { useAtomValue } from "jotai";
 import {
   ArrowLeftIcon,
+  Ban,
   CopyIcon,
   FileIcon,
   ImageIcon,
   InfoIcon,
   LaptopIcon,
-  PhoneIcon,
   SendIcon,
+  Smartphone,
   TabletIcon,
-  Trash2Icon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { VariableSizeList } from "react-window";
@@ -232,10 +232,10 @@ export function RoomPage({ roomId }: { roomId: string }) {
   }
 
   return (
-    <main className="flex h-dvh overflow-hidden bg-blue-50">
+    <main className="flex h-dvh overflow-hidden bg-white">
       <RoomSidebar />
       <section className="flex min-w-0 flex-1 flex-col">
-        <RoomHeader onReload={loadRoom} room={room} />
+        <RoomHeader room={room} />
         {room.membership === "member" ? (
           <>
             <MessageTimeline
@@ -305,13 +305,7 @@ export function RoomPage({ roomId }: { roomId: string }) {
   );
 }
 
-function RoomHeader({
-  room,
-  onReload,
-}: {
-  room: RoomDetail;
-  onReload: () => Promise<void>;
-}) {
+function RoomHeader({ room }: { room: RoomDetail }) {
   const navigate = useNavigate();
   const bootstrap = useAtomValue(bootstrapAtom);
   const [confirmation, setConfirmation] = useState("");
@@ -327,7 +321,10 @@ function RoomHeader({
         >
           <ArrowLeftIcon />
         </Button>
-        <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-accent text-accent-foreground">
+        <div
+          className="grid size-11 shrink-0 place-items-center bg-accent text-accent-foreground"
+          style={{ borderRadius: "calc(var(--radius) * 2 - 6px)" }}
+        >
           {room.name[0]}
         </div>
         <div className="min-w-0">
@@ -351,51 +348,49 @@ function RoomHeader({
                 <Modal.Heading>{room.name}</Modal.Heading>
               </Modal.Header>
               <Modal.Body className="space-y-5">
-                <div>
-                  <h3 className="mb-3 font-semibold text-sm">Members</h3>
-                  <div className="space-y-2">
-                    {room.members.map((member) => (
-                      <MemberRow key={member.id} member={member} />
-                    ))}
-                  </div>
+                <div className="space-y-1">
+                  {room.members.map((member) => (
+                    <MemberRow key={member.id} member={member} />
+                  ))}
                 </div>
                 {room.creatorId === bootstrap?.user.id ? (
-                  <div className="border-default-200 border-t pt-5">
+                  <div className="pt-3">
                     <h3 className="font-semibold text-danger">Delete Room</h3>
                     <p className="mt-1 text-default-500 text-sm">
                       Type {room.name} to permanently delete this room.
                     </p>
-                    <Input
-                      aria-label="Room name confirmation"
-                      className="mt-3"
-                      onChange={(event) => setConfirmation(event.target.value)}
-                      placeholder={room.name}
-                      value={confirmation}
-                    />
-                    <Button
-                      className="mt-3"
-                      isDisabled={confirmation !== room.name}
-                      onPress={async () => {
-                        await remove(`/api/rooms/${room.id}`, { confirmation });
-                        toast.success("Room deleted");
-                        await refreshBootstrap();
-                        await navigate({ to: "/" });
-                      }}
-                      variant="danger"
-                    >
-                      <Trash2Icon size={17} />
-                      Delete Room
-                    </Button>
+                    <div className="mt-3 flex flex-col items-center justify-start gap-2">
+                      <Input
+                        aria-label="Room name confirmation"
+                        fullWidth
+                        onChange={(event) =>
+                          setConfirmation(event.target.value)
+                        }
+                        placeholder={room.name}
+                        value={confirmation}
+                        variant="secondary"
+                      />
+                      <Button
+                        fullWidth
+                        onPress={async () => {
+                          if (confirmation !== room.name) {
+                            return;
+                          }
+                          await remove(`/api/rooms/${room.id}`, {
+                            confirmation,
+                          });
+                          toast.success("Room deleted");
+                          await refreshBootstrap();
+                          await navigate({ to: "/" });
+                        }}
+                        variant="danger"
+                      >
+                        Delete Room
+                      </Button>
+                    </div>
                   </div>
                 ) : null}
               </Modal.Body>
-              <Modal.Footer>
-                <Modal.CloseTrigger>
-                  <Button onPress={onReload} variant="outline">
-                    Done
-                  </Button>
-                </Modal.CloseTrigger>
-              </Modal.Footer>
             </Modal.Dialog>
           </Modal.Container>
         </Modal.Backdrop>
@@ -406,7 +401,7 @@ function RoomHeader({
 
 function MemberRow({ member }: { member: RoomMember }) {
   return (
-    <div className="flex items-center gap-3 rounded-2xl bg-default-50 p-3">
+    <div className="flex items-center gap-3 bg-default-50 p-3">
       <DeviceIcon kind={member.deviceKind} />
       <div className="min-w-0 flex-1">
         <p className="truncate font-medium">{member.username}</p>
@@ -538,10 +533,10 @@ function MessageRow({
   if (message.kind === "text") {
     content = (
       <motion.button
-        className={`group relative whitespace-pre-wrap rounded-3xl px-4 py-3 text-left text-[15px] leading-6 shadow-sm ${
+        className={`group relative whitespace-pre-wrap rounded-2xl px-4 py-3 text-left text-[15px] leading-6 shadow-sm ${
           self
-            ? "rounded-br-md bg-accent text-accent-foreground"
-            : "rounded-bl-md border border-default-200 bg-white text-foreground"
+            ? "bg-accent text-accent-foreground"
+            : "border border-default-100 bg-white text-foreground"
         }`}
         onClick={async () => {
           await navigator.clipboard.writeText(message.body ?? "");
@@ -551,7 +546,7 @@ function MessageRow({
         whileTap={{ scale: 0.97 }}
       >
         {message.body}
-        <CopyIcon className="ml-2 inline opacity-40" size={13} />
+        <CopyIcon className="ml-2 inline" size={13} />
       </motion.button>
     );
   } else if (message.fileOffer) {
@@ -580,17 +575,27 @@ function MessageRow({
           className={`max-w-[82%] ${self ? "items-end" : "items-start"} flex flex-col gap-1`}
         >
           {self ? null : (
-            <span className="px-1 text-default-500 text-xs">
-              {message.senderUsername}
-            </span>
+            <div className="flex items-center justify-start gap-1">
+              <span className="px-1 text-default-500 text-xs">
+                {message.senderUsername}
+              </span>
+              <span className="px-1 text-default-400 text-xs">
+                {new Intl.DateTimeFormat(undefined, {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                }).format(message.createdAt)}
+              </span>
+            </div>
           )}
           {content}
-          <span className="px-1 text-default-400 text-xs">
-            {new Intl.DateTimeFormat(undefined, {
-              hour: "2-digit",
-              minute: "2-digit",
-            }).format(message.createdAt)}
-          </span>
+          {self ? (
+            <span className="px-1 text-default-400 text-xs">
+              {new Intl.DateTimeFormat(undefined, {
+                hour: "2-digit",
+                minute: "2-digit",
+              }).format(message.createdAt)}
+            </span>
+          ) : null}
         </div>
       </div>
     </div>
@@ -616,14 +621,33 @@ function FileMessage({
   } else if (offer.status === "transferring") {
     receiveLabel = "Sender is busy";
   }
+  let receiveAction: React.ReactNode = null;
+  if (!isSelf) {
+    receiveAction = available ? (
+      <Button
+        className="mt-2"
+        onPress={() => onReceive(offer.id)}
+        size="sm"
+        variant="primary"
+      >
+        {receiveLabel}
+      </Button>
+    ) : (
+      <Chip color="danger">
+        <Ban width={12} />
+        <Chip.Label>{receiveLabel}</Chip.Label>
+      </Chip>
+    );
+  }
   return (
-    <Card className="w-72 rounded-3xl bg-white p-3 shadow-sm">
+    <Card className="w-72 rounded-2xl border border-default-100 bg-white p-3 shadow-sm">
       <div className="flex gap-3">
         {offer.previewDataUrl ? (
           <img
             alt=""
-            className="size-16 rounded-2xl object-cover"
+            className="size-18 object-cover"
             src={offer.previewDataUrl}
+            style={{ borderRadius: "calc(var(--radius) * 2 - 6px)" }}
           />
         ) : (
           <div className="grid size-16 shrink-0 place-items-center rounded-2xl bg-accent-soft text-accent-soft-foreground">
@@ -639,17 +663,8 @@ function FileMessage({
             <p className="mt-2 text-default-500 text-xs">
               {offer.status === "available" ? "Ready" : offer.status}
             </p>
-          ) : (
-            <Button
-              className="mt-2"
-              isDisabled={!available}
-              onPress={() => onReceive(offer.id)}
-              size="sm"
-              variant="primary"
-            >
-              {receiveLabel}
-            </Button>
-          )}
+          ) : null}
+          {receiveAction}
         </div>
       </div>
       {offer.status === "transferring" ? (
@@ -708,13 +723,13 @@ function Composer({
           Connection lost. Reconnecting…
         </p>
       )}
-      <div className="mx-auto flex max-w-4xl items-end gap-2">
+      <div className="mx-auto flex max-w-4xl items-center gap-2">
         <Button
           aria-label="Choose image"
           isDisabled={!connected}
           isIconOnly
           onPress={onImage}
-          variant="ghost"
+          variant="secondary"
         >
           <ImageIcon />
         </Button>
@@ -723,7 +738,7 @@ function Composer({
           isDisabled={!connected}
           isIconOnly
           onPress={onFile}
-          variant="ghost"
+          variant="secondary"
         >
           <FileIcon />
         </Button>
@@ -743,18 +758,18 @@ function Composer({
               send();
             }
           }}
-          placeholder="Message…"
           rows={1}
           value={value}
+          variant="secondary"
         />
         <motion.div whileTap={{ scale: 0.9 }}>
           <Button
             aria-label="Send message"
-            isDisabled={!(connected && value.trim())}
             isIconOnly
             isPending={sending}
             onPress={send}
             variant="primary"
+            // className={"rounded-2xl"}
           >
             <SendIcon />
           </Button>
@@ -781,13 +796,15 @@ function DeviceIcon({
   ];
   let Icon = LaptopIcon;
   if (kind === "mobile") {
-    Icon = PhoneIcon;
+    Icon = Smartphone;
   } else if (kind === "tablet") {
     Icon = TabletIcon;
   }
+  console.log("kind", kind);
   return (
     <div
-      className={`grid size-10 shrink-0 place-items-center rounded-2xl text-white ${colors[index]}`}
+      className={`grid size-10 shrink-0 place-items-center text-white ${colors[index]}`}
+      style={{ borderRadius: "calc(var(--radius) * 2 - 6px)" }}
     >
       <Icon size={18} />
     </div>

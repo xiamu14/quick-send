@@ -1,4 +1,5 @@
 import {
+  Avatar,
   Button,
   Card,
   Chip,
@@ -15,7 +16,6 @@ import {
   CompassIcon,
   KeyRoundIcon,
   PlusIcon,
-  QrCodeIcon,
   UserRoundIcon,
 } from "lucide-react";
 import QRCode from "qrcode";
@@ -112,21 +112,9 @@ function RoomListHeader({ compact = false }: { compact?: boolean }) {
       className={`flex h-20 shrink-0 items-center justify-between border-default-200 border-b ${compact ? "px-4" : "px-5 sm:px-7"}`}
     >
       <div>
-        <h1 className="font-semibold text-2xl tracking-tight">Rooms</h1>
-        <p className="mt-1 text-default-500 text-sm">
-          {bootstrap?.user.username}
-        </p>
+        <h1 className="font-semibold text-2xl tracking-tight">Quick Send</h1>
       </div>
       <div className="flex items-center gap-1">
-        <RequestPopover />
-        <Button
-          aria-label="Discover rooms"
-          isIconOnly
-          onPress={() => navigate({ to: "/discover" })}
-          variant="ghost"
-        >
-          <CompassIcon size={20} />
-        </Button>
         <motion.div whileTap={{ scale: 0.9 }}>
           <Button
             aria-label="Create room"
@@ -137,11 +125,22 @@ function RoomListHeader({ compact = false }: { compact?: boolean }) {
             isIconOnly
             isPending={creating}
             onPress={create}
+            size="sm"
             variant="primary"
           >
             <PlusIcon size={21} />
           </Button>
         </motion.div>
+        <RequestPopover />
+        <Button
+          aria-label="Discover rooms"
+          isIconOnly
+          onPress={() => navigate({ to: "/discover" })}
+          variant="ghost"
+        >
+          <CompassIcon size={20} />
+        </Button>
+
         <IdentityPopover />
       </div>
       {pending ? (
@@ -158,11 +157,43 @@ function RoomList({
   rooms: RoomSummary[];
   compact?: boolean;
 }) {
+  const roomAvatars = [
+    {
+      id: 1,
+      image:
+        "https://heroui-assets.nyc3.cdn.digitaloceanspaces.com/avatars/blue.jpg",
+      name: "John Doe",
+    },
+    {
+      id: 2,
+      image:
+        "https://heroui-assets.nyc3.cdn.digitaloceanspaces.com/avatars/green.jpg",
+      name: "Kate Wilson",
+    },
+    {
+      id: 3,
+      image:
+        "https://heroui-assets.nyc3.cdn.digitaloceanspaces.com/avatars/purple.jpg",
+      name: "Emily Chen",
+    },
+    {
+      id: 4,
+      image:
+        "https://heroui-assets.nyc3.cdn.digitaloceanspaces.com/avatars/orange.jpg",
+      name: "Michael Brown",
+    },
+    {
+      id: 5,
+      image:
+        "https://heroui-assets.nyc3.cdn.digitaloceanspaces.com/avatars/red.jpg",
+      name: "Olivia Davis",
+    },
+  ];
   if (!rooms.length) {
     return (
       <div className="grid min-h-96 place-items-center px-8 text-center">
         <div>
-          <div className="mx-auto grid size-16 place-items-center rounded-3xl bg-accent-soft text-accent-soft-foreground">
+          <div className="mx-auto grid size-16 place-items-center bg-accent-soft text-accent-soft-foreground">
             <PlusIcon size={28} />
           </div>
           <h2 className="mt-5 font-semibold text-lg">Create your first room</h2>
@@ -177,7 +208,7 @@ function RoomList({
     <div
       className={`space-y-2 overflow-y-auto ${compact ? "p-3" : "p-4 sm:p-6"}`}
     >
-      {rooms.map((room) => (
+      {rooms.map((room, index) => (
         <motion.div
           animate={{ opacity: 1 }}
           initial={{ opacity: 0 }}
@@ -185,15 +216,32 @@ function RoomList({
           layout
         >
           <Link
-            className="block rounded-3xl outline-none ring-accent focus-visible:ring-2"
+            className="block outline-none ring-accent focus-visible:ring-2"
             params={{ roomId: room.id }}
             to="/rooms/$roomId"
           >
-            <Card className="rounded-3xl border border-default-200 bg-white p-4 shadow-none transition-colors hover:bg-default-50">
+            <Card className="rounded-2xl border border-default-200 bg-white p-4 shadow-none transition-colors hover:bg-default-50">
               <div className="flex items-center gap-4">
-                <div className="grid size-12 shrink-0 place-items-center rounded-2xl bg-accent font-semibold text-accent-foreground text-lg">
+                {/*<div
+                  className="grid size-12 shrink-0 place-items-center bg-accent font-semibold text-accent-foreground text-lg"
+                  style={{ borderRadius: "calc(var(--radius) * 2 - 6px)" }}
+                >
                   {room.name.slice(0, 1)}
-                </div>
+                </div>*/}
+                <Avatar
+                  className="grid size-12 shrink-0 place-items-center"
+                  style={{ borderRadius: "calc(var(--radius) * 2 - 6px)" }}
+                >
+                  <Avatar.Image
+                    alt="Square Avatar"
+                    src={roomAvatars[index % roomAvatars.length]?.image}
+                  />
+                  <Avatar.Fallback
+                    style={{ borderRadius: "calc(var(--radius) * 2 - 6px)" }}
+                  >
+                    {room.name.slice(0, 1)}
+                  </Avatar.Fallback>
+                </Avatar>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <h2 className="truncate font-semibold">{room.name}</h2>
@@ -331,6 +379,9 @@ function IdentityPopover() {
     }).then(setQr);
   }, []);
   async function generateRecoveryCode() {
+    if (totp.length !== 6) {
+      return;
+    }
     try {
       const result = await post<{ recoveryCode: string }>(
         "/api/identity/recovery-code",
@@ -357,10 +408,6 @@ function IdentityPopover() {
             {bootstrap?.user.username}
           </Popover.Heading>
           <div className="mt-4 space-y-4">
-            <div className="flex items-center gap-3">
-              <QrCodeIcon className="text-default-500" size={18} />
-              <span className="text-sm">Share Quick Send</span>
-            </div>
             {qr ? (
               <img
                 alt="Quick Send QR code"
@@ -368,7 +415,7 @@ function IdentityPopover() {
                 src={qr}
               />
             ) : null}
-            <div className="border-default-200 border-t pt-4">
+            <div>
               <div className="mb-3 flex items-center gap-2 font-medium text-sm">
                 <KeyRoundIcon size={17} />
                 New recovery code
@@ -381,13 +428,14 @@ function IdentityPopover() {
                 <div className="space-y-2">
                   <Input
                     aria-label="Authenticator code"
+                    fullWidth
                     onChange={(event) => setTotp(event.target.value)}
                     placeholder="Authenticator code"
                     value={totp}
+                    variant="secondary"
                   />
                   <Button
                     fullWidth
-                    isDisabled={totp.length !== 6}
                     onPress={generateRecoveryCode}
                     size="sm"
                     variant="outline"
@@ -450,7 +498,7 @@ export function DiscoverPage() {
         </div>
         <div className="space-y-3">
           {rooms.map((room) => (
-            <Card className="rounded-3xl bg-white p-4 shadow-sm" key={room.id}>
+            <Card className="bg-white p-4 shadow-sm" key={room.id}>
               <div className="flex items-center gap-4">
                 <div className="grid size-12 place-items-center rounded-2xl bg-accent font-semibold text-accent-foreground text-lg">
                   {room.name[0]}

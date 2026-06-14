@@ -33,6 +33,9 @@ export function RegisterScreen() {
   }, [setup]);
 
   async function start() {
+    if (!username.trim()) {
+      return;
+    }
     setLoading(true);
     try {
       setSetup(
@@ -80,12 +83,13 @@ export function RegisterScreen() {
   }
 
   return (
-    <IdentityLayout title="Create device identity">
+    <IdentityLayout>
       {setup || recoveryCode ? null : (
         <div className="space-y-4">
           <p className="text-default-500 text-sm">
             Choose a username for this device.
           </p>
+
           <Input
             aria-label="Username"
             autoFocus
@@ -93,15 +97,16 @@ export function RegisterScreen() {
             onChange={(event) => setUsername(event.target.value)}
             placeholder="Username"
             value={username}
+            variant="secondary"
           />
           <Button
             fullWidth
-            isDisabled={!username.trim()}
+            // isDisabled={!username.trim()}
             isPending={loading}
             onPress={start}
             variant="primary"
           >
-            Continue
+            Register
           </Button>
           <p className="text-center text-default-500 text-sm">
             Already registered?{" "}
@@ -132,6 +137,7 @@ export function RegisterScreen() {
             onChange={(event) => setCode(event.target.value)}
             placeholder="6-digit code"
             value={code}
+            variant="secondary"
           />
           <Button
             fullWidth
@@ -152,12 +158,17 @@ export function RegisterScreen() {
           <div className="rounded-2xl bg-accent-soft p-5 text-center font-mono font-semibold text-accent-soft-foreground text-xl tracking-wider">
             {recoveryCode}
           </div>
-          <label className="flex items-center gap-3 text-sm">
-            <input
+          <label
+            className="flex items-center gap-3 text-sm"
+            htmlFor="recovery-code-saved"
+          >
+            <Input
               checked={saved}
               className="size-4"
+              id="recovery-code-saved"
               onChange={(event) => setSaved(event.target.checked)}
               type="checkbox"
+              variant="secondary"
             />
             I saved this recovery code
           </label>
@@ -183,6 +194,9 @@ export function RecoverScreen() {
   const [loading, setLoading] = useState(false);
 
   async function start() {
+    if (!username.trim()) {
+      return;
+    }
     setLoading(true);
     try {
       const result = await post<{ challengeId: string }>(
@@ -198,6 +212,9 @@ export function RecoverScreen() {
   }
 
   async function confirm() {
+    if (!code.trim()) {
+      return;
+    }
     setLoading(true);
     try {
       const result = await post<{ credentialToken: string }>(
@@ -216,39 +233,37 @@ export function RecoverScreen() {
   }
 
   return (
-    <IdentityLayout title="Recover device identity">
+    <IdentityLayout>
       <div className="space-y-4">
-        <p className="text-default-500 text-sm">
-          Use your authenticator code or recovery code. The old device will be
-          signed out.
-        </p>
+        <p className="text-default-500 text-sm">Use your authenticator code.</p>
         <Input
           aria-label="Username"
           autoFocus
-          disabled={Boolean(challengeId)}
           fullWidth
           onChange={(event) => setUsername(event.target.value)}
           placeholder="Username"
           value={username}
+          variant="secondary"
         />
-        {challengeId ? (
-          <Input
-            aria-label="Verification code"
-            autoFocus
-            fullWidth
-            onChange={(event) => setCode(event.target.value.toUpperCase())}
-            placeholder="Authenticator or recovery code"
-            value={code}
-          />
-        ) : null}
+
+        <Input
+          aria-label="Verification code"
+          autoFocus
+          fullWidth
+          onChange={(event) => setCode(event.target.value.toUpperCase())}
+          placeholder="Verification code"
+          value={code}
+          variant="secondary"
+        />
+
         <Button
           fullWidth
-          isDisabled={challengeId ? !code.trim() : !username.trim()}
+          // isDisabled={challengeId ? !code.trim() : !username.trim()}
           isPending={loading}
           onPress={challengeId ? confirm : start}
           variant="primary"
         >
-          {challengeId ? "Recover" : "Continue"}
+          {"Sign In"}
         </Button>
         <p className="text-center text-default-500 text-sm">
           New device?{" "}
@@ -261,20 +276,13 @@ export function RecoverScreen() {
   );
 }
 
-function IdentityLayout({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
+function IdentityLayout({ children }: { children: React.ReactNode }) {
   return (
     <main className="grid min-h-dvh place-items-center bg-blue-50 px-5 py-10">
       <Card className="w-full max-w-md rounded-3xl bg-white p-6 shadow-sm sm:p-8">
         <Card.Header>
-          <div className="space-y-1">
-            <p className="font-medium text-accent text-sm">Quick Send</p>
-            <Card.Title className="text-2xl">{title}</Card.Title>
+          <div className="flex w-full justify-center space-y-1">
+            <Card.Title className="text-2xl">Quick Send</Card.Title>
           </div>
         </Card.Header>
         <Card.Content className="pt-5">{children}</Card.Content>
