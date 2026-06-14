@@ -2,10 +2,10 @@ import { Button, Card, Input } from "@heroui/react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import QRCode from "qrcode";
 import { useEffect, useState } from "react";
-import { toast } from "sonner";
 import { post } from "@/lib/api";
 import { setCredential } from "@/lib/credential";
 import { disconnectSocket, refreshBootstrap } from "@/lib/socket";
+import { toast } from "@/lib/toast";
 
 type RegistrationSetup = {
   setupToken: string;

@@ -10,7 +10,7 @@ function Root() {
   return (
     <>
       <Outlet />
-      <Toaster position="top-center" richColors />
+      <Toaster position="top-center" richColors visibleToasts={1} />
     </>
   );
 }

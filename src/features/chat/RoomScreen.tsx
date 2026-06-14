@@ -24,7 +24,6 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { VariableSizeList } from "react-window";
-import { toast } from "sonner";
 import {
   RoomSidebar,
   useAuthenticatedBootstrap,
@@ -37,6 +36,7 @@ import {
   setRoomDeletedHandler,
   setTransferHandlers,
 } from "@/lib/socket";
+import { toast } from "@/lib/toast";
 import type {
   ChatMessage,
   MessagePage,

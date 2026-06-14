@@ -23,9 +23,9 @@ import {
 import QRCode from "qrcode";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
-import { toast } from "sonner";
 import { api, post } from "@/lib/api";
 import { getSocket, refreshBootstrap } from "@/lib/socket";
+import { toast } from "@/lib/toast";
 import type { DiscoverRoom, JoinRequest, RoomSummary } from "@/shared/types";
 import { appStore, bootstrapAtom, bootstrapLoadingAtom } from "@/store/app";
 import { useMobile } from "@/web/use-mobile";

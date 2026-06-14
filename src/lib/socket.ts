@@ -1,5 +1,4 @@
 import { io, type Socket } from "socket.io-client";
-import { toast } from "sonner";
 import type {
   ClientToServerEvents,
   ServerToClientEvents,
@@ -16,6 +15,7 @@ import {
 } from "@/store/app";
 import { ApiError, api } from "./api";
 import { clearCredential, getCredential } from "./credential";
+import { toast } from "./toast";
 
 export type AppSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
