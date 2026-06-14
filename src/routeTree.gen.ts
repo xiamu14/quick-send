@@ -11,7 +11,6 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as RecoverRouteImport } from './routes/recover'
-import { Route as DiscoverRouteImport } from './routes/discover'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as RoomsRoomIdRouteImport } from './routes/rooms.$roomId'
 
@@ -23,11 +22,6 @@ const SetupRoute = SetupRouteImport.update({
 const RecoverRoute = RecoverRouteImport.update({
   id: '/recover',
   path: '/recover',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DiscoverRoute = DiscoverRouteImport.update({
-  id: '/discover',
-  path: '/discover',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -43,14 +37,12 @@ const RoomsRoomIdRoute = RoomsRoomIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/discover': typeof DiscoverRoute
   '/recover': typeof RecoverRoute
   '/setup': typeof SetupRoute
   '/rooms/$roomId': typeof RoomsRoomIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/discover': typeof DiscoverRoute
   '/recover': typeof RecoverRoute
   '/setup': typeof SetupRoute
   '/rooms/$roomId': typeof RoomsRoomIdRoute
@@ -58,22 +50,20 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/discover': typeof DiscoverRoute
   '/recover': typeof RecoverRoute
   '/setup': typeof SetupRoute
   '/rooms/$roomId': typeof RoomsRoomIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/discover' | '/recover' | '/setup' | '/rooms/$roomId'
+  fullPaths: '/' | '/recover' | '/setup' | '/rooms/$roomId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/discover' | '/recover' | '/setup' | '/rooms/$roomId'
-  id: '__root__' | '/' | '/discover' | '/recover' | '/setup' | '/rooms/$roomId'
+  to: '/' | '/recover' | '/setup' | '/rooms/$roomId'
+  id: '__root__' | '/' | '/recover' | '/setup' | '/rooms/$roomId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  DiscoverRoute: typeof DiscoverRoute
   RecoverRoute: typeof RecoverRoute
   SetupRoute: typeof SetupRoute
   RoomsRoomIdRoute: typeof RoomsRoomIdRoute
@@ -95,13 +85,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof RecoverRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/discover': {
-      id: '/discover'
-      path: '/discover'
-      fullPath: '/discover'
-      preLoaderRoute: typeof DiscoverRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/': {
       id: '/'
       path: '/'
@@ -121,7 +104,6 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  DiscoverRoute: DiscoverRoute,
   RecoverRoute: RecoverRoute,
   SetupRoute: SetupRoute,
   RoomsRoomIdRoute: RoomsRoomIdRoute,

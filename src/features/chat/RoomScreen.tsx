@@ -52,6 +52,7 @@ import {
   transferProgressAtom,
 } from "@/store/app";
 import { createImagePreview } from "@/web/preview";
+import { useMobile } from "@/web/use-mobile";
 
 const mobileUserAgentPattern = /Mobi|Android/i;
 
@@ -307,6 +308,7 @@ export function RoomPage({ roomId }: { roomId: string }) {
 
 function RoomHeader({ room }: { room: RoomDetail }) {
   const navigate = useNavigate();
+  const mobile = useMobile();
   const bootstrap = useAtomValue(bootstrapAtom);
   const [confirmation, setConfirmation] = useState("");
   return (
@@ -341,13 +343,22 @@ function RoomHeader({ room }: { room: RoomDetail }) {
           </Button>
         </Modal.Trigger>
         <Modal.Backdrop>
-          <Modal.Container placement="center">
-            <Modal.Dialog>
+          <Modal.Container
+            className={mobile ? "p-0" : ""}
+            placement={mobile ? "bottom" : "center"}
+          >
+            <Modal.Dialog
+              className={
+                mobile ? "max-h-[85dvh] min-h-[40dvh] rounded-b-none" : ""
+              }
+            >
               <Modal.CloseTrigger />
               <Modal.Header>
                 <Modal.Heading>{room.name}</Modal.Heading>
               </Modal.Header>
-              <Modal.Body className="space-y-5">
+              <Modal.Body
+                className={mobile ? "min-h-0 flex-1 space-y-5" : "space-y-5"}
+              >
                 <div className="space-y-1">
                   {room.members.map((member) => (
                     <MemberRow key={member.id} member={member} />

@@ -4,9 +4,11 @@ import {
   Card,
   Chip,
   Input,
+  Modal,
   Popover,
   PopoverContent,
   PopoverTrigger,
+  ScrollShadow,
 } from "@heroui/react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { motion } from "framer-motion";
@@ -19,12 +21,14 @@ import {
   UserRoundIcon,
 } from "lucide-react";
 import QRCode from "qrcode";
+import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { api, post } from "@/lib/api";
 import { getSocket, refreshBootstrap } from "@/lib/socket";
 import type { DiscoverRoom, JoinRequest, RoomSummary } from "@/shared/types";
 import { appStore, bootstrapAtom, bootstrapLoadingAtom } from "@/store/app";
+import { useMobile } from "@/web/use-mobile";
 
 export function useAuthenticatedBootstrap() {
   const navigate = useNavigate();
@@ -62,7 +66,7 @@ export function RoomsPage() {
   }
   return (
     <main className="min-h-dvh bg-blue-50">
-      <div className="mx-auto min-h-dvh max-w-3xl bg-white shadow-sm">
+      <div className="mx-auto flex h-dvh max-w-3xl flex-col overflow-hidden bg-white shadow-sm">
         <RoomListHeader />
         <RoomList rooms={bootstrap.rooms} />
       </div>
@@ -76,7 +80,7 @@ export function RoomSidebar() {
     return null;
   }
   return (
-    <aside className="hidden h-dvh w-96 shrink-0 border-default-200 border-r bg-white md:block">
+    <aside className="hidden h-dvh w-96 shrink-0 flex-col overflow-hidden border-default-200 border-r bg-white md:flex">
       <RoomListHeader compact />
       <RoomList compact rooms={bootstrap.rooms} />
     </aside>
@@ -132,15 +136,7 @@ function RoomListHeader({ compact = false }: { compact?: boolean }) {
           </Button>
         </motion.div>
         <RequestPopover />
-        <Button
-          aria-label="Discover rooms"
-          isIconOnly
-          onPress={() => navigate({ to: "/discover" })}
-          variant="ghost"
-        >
-          <CompassIcon size={20} />
-        </Button>
-
+        <DiscoverPopover />
         <IdentityPopover />
       </div>
       {pending ? (
@@ -191,7 +187,7 @@ function RoomList({
   ];
   if (!rooms.length) {
     return (
-      <div className="grid min-h-96 place-items-center px-8 text-center">
+      <div className="grid min-h-0 flex-1 place-items-center px-8 text-center">
         <div>
           <div className="mx-auto grid size-16 place-items-center bg-accent-soft text-accent-soft-foreground">
             <PlusIcon size={28} />
@@ -205,8 +201,9 @@ function RoomList({
     );
   }
   return (
-    <div
-      className={`space-y-2 overflow-y-auto ${compact ? "p-3" : "p-4 sm:p-6"}`}
+    <ScrollShadow
+      className={`min-h-0 flex-1 space-y-2 overflow-y-auto ${compact ? "p-3" : "p-4 sm:p-6"}`}
+      hideScrollBar
     >
       {rooms.map((room, index) => (
         <motion.div
@@ -273,7 +270,7 @@ function RoomList({
           </Link>
         </motion.div>
       ))}
-    </div>
+    </ScrollShadow>
   );
 }
 
@@ -288,8 +285,10 @@ function RequestPopover() {
     );
   }, [bootstrap]);
   return (
-    <Popover>
-      <PopoverTrigger>
+    <ResponsivePopover
+      contentClassName="w-80"
+      title="Join requests"
+      trigger={
         <Button aria-label="Join requests" isIconOnly variant="ghost">
           <span className="relative">
             <BellIcon size={20} />
@@ -300,24 +299,18 @@ function RequestPopover() {
             ) : null}
           </span>
         </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-80 p-3">
-        <Popover.Dialog>
-          <Popover.Heading className="mb-3 font-semibold">
-            Join requests
-          </Popover.Heading>
-          {requests.length ? (
-            <div className="space-y-3">
-              {requests.map((request) => (
-                <RequestRow key={request.id} request={request} />
-              ))}
-            </div>
-          ) : (
-            <p className="text-default-500 text-sm">No pending requests</p>
-          )}
-        </Popover.Dialog>
-      </PopoverContent>
-    </Popover>
+      }
+    >
+      {requests.length ? (
+        <div className="space-y-3">
+          {requests.map((request) => (
+            <RequestRow key={request.id} request={request} />
+          ))}
+        </div>
+      ) : (
+        <p className="text-default-500 text-sm">No pending requests</p>
+      )}
+    </ResponsivePopover>
   );
 }
 
@@ -396,65 +389,56 @@ function IdentityPopover() {
     }
   }
   return (
-    <Popover>
-      <PopoverTrigger>
+    <ResponsivePopover
+      contentClassName="w-72"
+      title={bootstrap?.user.username ?? "Identity"}
+      trigger={
         <Button aria-label="Identity menu" isIconOnly variant="ghost">
           <UserRoundIcon size={20} />
         </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-72 p-4">
-        <Popover.Dialog>
-          <Popover.Heading className="font-semibold">
-            {bootstrap?.user.username}
-          </Popover.Heading>
-          <div className="mt-4 space-y-4">
-            {qr ? (
-              <img
-                alt="Quick Send QR code"
-                className="mx-auto size-44"
-                src={qr}
-              />
-            ) : null}
-            <div>
-              <div className="mb-3 flex items-center gap-2 font-medium text-sm">
-                <KeyRoundIcon size={17} />
-                New recovery code
-              </div>
-              {recoveryCode ? (
-                <div className="rounded-xl bg-accent-soft p-3 text-center font-mono text-accent-soft-foreground">
-                  {recoveryCode}
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <Input
-                    aria-label="Authenticator code"
-                    fullWidth
-                    onChange={(event) => setTotp(event.target.value)}
-                    placeholder="Authenticator code"
-                    value={totp}
-                    variant="secondary"
-                  />
-                  <Button
-                    fullWidth
-                    onPress={generateRecoveryCode}
-                    size="sm"
-                    variant="outline"
-                  >
-                    Generate
-                  </Button>
-                </div>
-              )}
-            </div>
+      }
+    >
+      <div className="space-y-4">
+        {qr ? (
+          <img alt="Quick Send QR code" className="mx-auto size-44" src={qr} />
+        ) : null}
+        <div>
+          <div className="mb-3 flex items-center gap-2 font-medium text-sm">
+            <KeyRoundIcon size={17} />
+            New recovery code
           </div>
-        </Popover.Dialog>
-      </PopoverContent>
-    </Popover>
+          {recoveryCode ? (
+            <div className="rounded-xl bg-accent-soft p-3 text-center font-mono text-accent-soft-foreground">
+              {recoveryCode}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <Input
+                aria-label="Authenticator code"
+                fullWidth
+                onChange={(event) => setTotp(event.target.value)}
+                placeholder="Authenticator code"
+                value={totp}
+                variant="secondary"
+              />
+              <Button
+                fullWidth
+                onPress={generateRecoveryCode}
+                size="sm"
+                variant="outline"
+              >
+                Generate
+              </Button>
+            </div>
+          )}
+        </div>
+      </div>
+    </ResponsivePopover>
   );
 }
 
-export function DiscoverPage() {
-  const navigate = useNavigate();
-  const { bootstrap, loading } = useAuthenticatedBootstrap();
+function DiscoverPopover() {
+  const bootstrap = useAtomValue(bootstrapAtom);
   const [rooms, setRooms] = useState<DiscoverRoom[]>([]);
   const [pending, setPending] = useState<string>();
   useEffect(() => {
@@ -468,9 +452,6 @@ export function DiscoverPage() {
         });
     }
   }, [bootstrap]);
-  if (loading || !bootstrap) {
-    return <LoadingScreen />;
-  }
   async function request(roomId: string) {
     setPending(roomId);
     try {
@@ -485,52 +466,100 @@ export function DiscoverPage() {
     }
   }
   return (
-    <main className="min-h-dvh bg-blue-50 px-4 py-6">
-      <div className="mx-auto max-w-2xl">
-        <div className="mb-6 flex items-center justify-between">
-          <div>
-            <p className="text-accent text-sm">Quick Send</p>
-            <h1 className="font-semibold text-2xl">Discover rooms</h1>
+    <ResponsivePopover
+      contentClassName="w-96"
+      title="Discover rooms"
+      trigger={
+        <Button aria-label="Discover rooms" isIconOnly variant="ghost">
+          <CompassIcon size={20} />
+        </Button>
+      }
+    >
+      <ScrollShadow
+        className="max-h-96 space-y-2 overflow-y-auto"
+        hideScrollBar
+      >
+        {rooms.map((room) => (
+          <div
+            className="flex items-center gap-3 rounded-2xl bg-default-50 p-3"
+            key={room.id}
+          >
+            <div className="grid size-11 shrink-0 place-items-center rounded-xl bg-accent font-semibold text-accent-foreground">
+              {room.name[0]}
+            </div>
+            <div className="min-w-0 flex-1">
+              <h2 className="truncate font-semibold">{room.name}</h2>
+              <p className="truncate text-default-500 text-sm">
+                {room.creatorUsername} · {room.memberCount}/10
+              </p>
+              <p className="text-default-400 text-xs">
+                Creator {room.creatorOnline ? "online" : "offline"}
+              </p>
+            </div>
+            <Button
+              isPending={pending === room.id}
+              onPress={() => request(room.id)}
+              size="sm"
+              variant="primary"
+            >
+              Request
+            </Button>
           </div>
-          <Button onPress={() => navigate({ to: "/" })} variant="ghost">
-            Done
-          </Button>
-        </div>
-        <div className="space-y-3">
-          {rooms.map((room) => (
-            <Card className="bg-white p-4 shadow-sm" key={room.id}>
-              <div className="flex items-center gap-4">
-                <div className="grid size-12 place-items-center rounded-2xl bg-accent font-semibold text-accent-foreground text-lg">
-                  {room.name[0]}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <h2 className="font-semibold">{room.name}</h2>
-                  <p className="text-default-500 text-sm">
-                    {room.creatorUsername} · {room.memberCount}/10 members
-                  </p>
-                  <p className="mt-1 text-default-400 text-xs">
-                    Creator {room.creatorOnline ? "online" : "offline"}
-                  </p>
-                </div>
-                <Button
-                  isPending={pending === room.id}
-                  onPress={() => request(room.id)}
-                  size="sm"
-                  variant="primary"
-                >
-                  Request
-                </Button>
-              </div>
-            </Card>
-          ))}
-          {rooms.length ? null : (
-            <p className="py-20 text-center text-default-500 text-sm">
-              No rooms available
-            </p>
-          )}
-        </div>
-      </div>
-    </main>
+        ))}
+        {rooms.length ? null : (
+          <p className="py-12 text-center text-default-500 text-sm">
+            No rooms available
+          </p>
+        )}
+      </ScrollShadow>
+    </ResponsivePopover>
+  );
+}
+
+function ResponsivePopover({
+  children,
+  contentClassName,
+  title,
+  trigger,
+}: {
+  children: ReactNode;
+  contentClassName: string;
+  title: string;
+  trigger: ReactNode;
+}) {
+  const mobile = useMobile();
+  if (mobile) {
+    return (
+      <Modal>
+        <Modal.Trigger>{trigger}</Modal.Trigger>
+        <Modal.Backdrop>
+          <Modal.Container className="p-0" placement="bottom">
+            <Modal.Dialog className="max-h-[85dvh] min-h-[40dvh] rounded-b-none">
+              <Modal.CloseTrigger />
+              <Modal.Header>
+                <Modal.Heading>{title}</Modal.Heading>
+              </Modal.Header>
+              <Modal.Body className="min-h-0 flex-1 pb-2">
+                {children}
+              </Modal.Body>
+            </Modal.Dialog>
+          </Modal.Container>
+        </Modal.Backdrop>
+      </Modal>
+    );
+  }
+  return (
+    <Popover>
+      <PopoverTrigger>{trigger}</PopoverTrigger>
+      <PopoverContent className={`${contentClassName} p-4`}>
+        <Popover.Dialog>
+          <Popover.Heading className="mb-3 font-semibold">
+            {title}
+          </Popover.Heading>
+          {children}
+        </Popover.Dialog>
+      </PopoverContent>
+    </Popover>
   );
 }
 
