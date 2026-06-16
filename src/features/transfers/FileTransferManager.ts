@@ -1,6 +1,7 @@
 import type { AppSocket } from "@/lib/socket";
 import type { RtcServerPayload } from "@/shared/protocol";
 import type { FileOffer } from "@/shared/types";
+import { prepareReceivedFile, type ReceivedFileResult } from "@/web/save-file";
 
 const chunkSize = 64 * 1024;
 
@@ -14,7 +15,10 @@ export class FileTransferManager {
     private readonly socket: AppSocket,
     private readonly onProgress: (offerId: string, progress: number) => void,
     private readonly onError: (offerId: string) => void,
-    private readonly onComplete: (offerId: string, fileName: string) => void
+    private readonly onComplete: (
+      offerId: string,
+      result: ReceivedFileResult
+    ) => void
   ) {}
 
   remember(clientMessageId: string, file: File) {
@@ -191,16 +195,10 @@ export class FileTransferManager {
           return;
         }
         if (message.type === "done" && meta) {
-          const blob = new Blob(chunks, {
+          const file = new File(chunks, meta.name, {
             type: meta.mime || "application/octet-stream",
           });
-          const url = URL.createObjectURL(blob);
-          const link = document.createElement("a");
-          link.href = url;
-          link.download = meta.name;
-          link.click();
-          window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-          this.onComplete(offerId, meta.name);
+          this.onComplete(offerId, prepareReceivedFile(file));
           this.socket.emit("transfer:complete", { roomId, offerId });
         }
         return;

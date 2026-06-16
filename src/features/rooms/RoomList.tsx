@@ -9,6 +9,7 @@ import {
   PopoverContent,
   PopoverTrigger,
   ScrollShadow,
+  Spinner,
 } from "@heroui/react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { motion } from "framer-motion";
@@ -566,7 +567,7 @@ function ResponsivePopover({
 export function LoadingScreen() {
   return (
     <main className="grid min-h-dvh place-items-center bg-blue-50 text-default-500 text-sm">
-      Loading
+      <Spinner />
     </main>
   );
 }

@@ -6,9 +6,11 @@ import { generateTOTP } from "@oslojs/otp";
 import type { User } from "@/shared/types";
 import { type AppDatabase, openDatabase } from "./db";
 import {
+  confirmRecovery,
   confirmRegistration,
   normalizeUsername,
   resolveCredential,
+  startRecovery,
   startRegistration,
 } from "./identity";
 import { createTextMessage, listMessages } from "./messages";
@@ -57,6 +59,36 @@ describe("identity", () => {
   test("rejects invalid usernames", () => {
     expect(() => normalizeUsername("a")).toThrow();
     expect(() => normalizeUsername("bad/name")).toThrow();
+  });
+
+  test("recovers an identity with one MFA challenge", async () => {
+    const { database } = createTestDatabase();
+    const encryptionKey = crypto.getRandomValues(new Uint8Array(32));
+    const setup = startRegistration(database, "Ada", "desktop");
+    const code = generateTOTP(decodeBase32IgnorePadding(setup.secret), 30, 6);
+    const registered = await confirmRegistration(
+      database,
+      encryptionKey,
+      setup.setupToken,
+      code
+    );
+    const challenge = startRecovery("Ada", "mobile");
+    const recovered = await confirmRecovery(
+      database,
+      encryptionKey,
+      challenge.challengeId,
+      code
+    );
+
+    expect(
+      await resolveCredential(database, registered.credentialToken)
+    ).toBeUndefined();
+    expect(
+      await resolveCredential(database, recovered.credentialToken)
+    ).toMatchObject({
+      id: registered.user.id,
+      deviceKind: "mobile",
+    });
   });
 });
 

@@ -189,37 +189,22 @@ export function RegisterScreen() {
 export function RecoverScreen() {
   const navigate = useNavigate();
   const [username, setUsername] = useState("");
-  const [challengeId, setChallengeId] = useState("");
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
 
-  async function start() {
-    if (!username.trim()) {
+  async function signIn() {
+    if (!(username.trim() && code.trim())) {
       return;
     }
     setLoading(true);
     try {
-      const result = await post<{ challengeId: string }>(
+      const challenge = await post<{ challengeId: string }>(
         "/api/identity/recover/start",
         { username }
       );
-      setChallengeId(result.challengeId);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Recovery failed");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function confirm() {
-    if (!code.trim()) {
-      return;
-    }
-    setLoading(true);
-    try {
       const result = await post<{ credentialToken: string }>(
         "/api/identity/recover/confirm",
-        { challengeId, code }
+        { challengeId: challenge.challengeId, code }
       );
       setCredential(result.credentialToken);
       disconnectSocket();
@@ -248,7 +233,6 @@ export function RecoverScreen() {
 
         <Input
           aria-label="Verification code"
-          autoFocus
           fullWidth
           onChange={(event) => setCode(event.target.value.toUpperCase())}
           placeholder="Verification code"
@@ -258,12 +242,12 @@ export function RecoverScreen() {
 
         <Button
           fullWidth
-          // isDisabled={challengeId ? !code.trim() : !username.trim()}
+          isDisabled={!(username.trim() && code.trim())}
           isPending={loading}
-          onPress={challengeId ? confirm : start}
+          onPress={signIn}
           variant="primary"
         >
-          {"Sign In"}
+          Sign In
         </Button>
         <p className="text-center text-default-500 text-sm">
           New device?{" "}
