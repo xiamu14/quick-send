@@ -3,7 +3,8 @@
 ## Product
 
 Quick Send is a LAN-only room chat and direct file-transfer web app. One device
-runs the Bun service. Other devices on the same LAN open its Portless HTTPS URL.
+runs the Bun service. Other devices on the same LAN open
+`http://quick.local:1355` through Portless LAN mode.
 
 - UI: React 19, TanStack Router, HeroUI, Tailwind CSS v4, Jotai
 - API: Hono REST + Socket.IO over WebSocket only
@@ -14,23 +15,14 @@ runs the Bun service. Other devices on the same LAN open its Portless HTTPS URL.
 
 ## Identity
 
-Every device maps to one user and every user has one active device credential.
+Visiting Quick Send creates or restores a local user automatically. The browser
+loads FingerprintJS, sends the visitor identifier to the service, and receives
+a Bearer credential. The user-facing name is a random short ID, 4 to 6
+characters long.
 
-Registration:
-
-1. Choose a unique username.
-2. Scan a TOTP QR code (`SHA-1`, 6 digits, 30 seconds).
-3. Confirm one valid code.
-4. Receive one single-use recovery code formatted `XXXX-XXXX-XXXX`.
-
-The TOTP secret is encrypted with AES-GCM using the required
-`IDENTITY_ENCRYPTION_KEY`. Session and recovery tokens are stored as SHA-256
-hashes. A Secure, HttpOnly, SameSite=Strict cookie contains the session token.
-
-Device migration uses username plus either TOTP or the recovery code. A
-successful migration revokes the old credential and closes its sockets. The
-recovery code is consumed and can be regenerated from the active device after
-TOTP verification. Credentials expire after 90 days without activity.
+The service stores only a SHA-256 hash of the FingerprintJS visitor identifier.
+Credential tokens are stored as SHA-256 hashes and expire after 90 days without
+activity. Quick Send does not use cookies.
 
 ## Rooms
 
@@ -99,7 +91,6 @@ Tables:
 - `schema_migrations`
 - `users`
 - `credentials`
-- `recovery_codes`
 - `rooms`
 - `room_members`
 - `join_requests`
@@ -112,11 +103,7 @@ room name snapshot and set `room_id` to null after deletion.
 
 ## REST
 
-- `POST /api/identity/register/start`
-- `POST /api/identity/register/confirm`
-- `POST /api/identity/recover/start`
-- `POST /api/identity/recover/confirm`
-- `POST /api/identity/recovery-code`
+- `POST /api/identity/ensure`
 - `GET /api/bootstrap`
 - `GET /api/discover`
 - `POST /api/rooms`
@@ -132,8 +119,8 @@ response boundaries use ArkType. Mutations are not retried automatically.
 
 ## Socket.IO
 
-Socket.IO uses only the default namespace and WebSocket transport. The
-credential cookie and Origin are validated during connection.
+Socket.IO uses only the default namespace and WebSocket transport. The Bearer
+credential and Origin are validated during connection.
 
 Server rooms:
 
@@ -171,14 +158,11 @@ delivery optimization.
 
 ## Security and Operations
 
-- Portless LAN HTTPS is required.
-- Each client device must trust the Portless CA.
+- Portless LAN HTTP serves the fixed `quick.local:1355` origin.
 - Origin validation applies to REST mutations and Socket.IO.
 - Hono secure headers use a same-origin CSP.
-- Verification is limited by `IP + username`: 5 failures lock for 5 minutes;
-  each IP is limited to 20 attempts per minute.
-- Logs never include credentials, OTP values, message text, filenames or full
-  user agents.
+- Logs never include credentials, visitor identifiers, message text, filenames
+  or full user agents.
 - A process lock prevents two service instances from sharing one database.
 - SIGINT and SIGTERM close Socket.IO, checkpoint WAL, close SQLite and release
   the process lock.

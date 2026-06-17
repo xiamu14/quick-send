@@ -8,27 +8,17 @@ import type { Context } from "hono";
 import { Hono } from "hono";
 import { secureHeaders } from "hono/secure-headers";
 import type { User } from "@/shared/types";
-import { readEncryptionKey } from "./crypto";
 import { checkpointAndClose, openDatabase } from "./db";
 import { AppError, errorPayload } from "./errors";
 import {
   cleanupIdentityState,
-  confirmRecovery,
-  confirmRegistration,
   deviceKindFromUserAgent,
+  ensureIdentity,
   type IdentityResult,
-  regenerateRecoveryCode,
   resolveCredential,
-  startRecovery,
-  startRegistration,
 } from "./identity";
-import { cleanupOffers, listMessages } from "./messages";
+import { cleanupOffers, createTextMessage, listMessages } from "./messages";
 import { acquireProcessLock } from "./process-lock";
-import {
-  assertVerificationAllowed,
-  clearVerificationFailures,
-  recordVerificationFailure,
-} from "./rate-limit";
 import {
   cleanupRoomState,
   createRoom,
@@ -48,7 +38,6 @@ const bearerPattern = /^Bearer (.+)$/i;
 
 const releaseProcessLock = await acquireProcessLock();
 const database = openDatabase();
-const encryptionKey = readEncryptionKey();
 const port = Number(process.env.PORT);
 if (!Number.isFinite(port)) {
   throw new Error("PORT is required");
@@ -67,6 +56,7 @@ app.use(
       styleSrc: ["'self'", "'unsafe-inline'"],
     },
     referrerPolicy: "no-referrer",
+    strictTransportSecurity: false,
     xFrameOptions: "DENY",
   })
 );
@@ -86,100 +76,30 @@ app.use("/api/*", async (context, next) => {
   await next();
 });
 
-const registerStartSchema = type({ username: "string" });
-const registerConfirmSchema = type({
-  setupToken: "string",
-  code: "string",
-});
-const recoverStartSchema = type({ username: "string" });
-const recoverConfirmSchema = type({
-  challengeId: "string",
-  code: "string",
-});
-const recoveryCodeSchema = type({ code: "string" });
+const identityEnsureSchema = type({ visitorId: "string>8" });
 const deleteRoomSchema = type({ confirmation: "string" });
+const textMessageSchema = type({
+  clientMessageId: "string",
+  body: "string",
+});
 
-app.post("/api/identity/register/start", async (context) =>
+app.post("/api/identity/ensure", async (context) =>
   route(context, async () => {
-    const input = await parseJson(context.req.raw, registerStartSchema);
-    return startRegistration(
+    const input = await parseJson(context.req.raw, identityEnsureSchema);
+    const result: IdentityResult = await ensureIdentity(
       database,
-      input.username,
+      input.visitorId,
       deviceKindFromUserAgent(context.req.header("user-agent") ?? "")
     );
-  })
-);
-
-app.post("/api/identity/register/confirm", async (context) =>
-  route(context, async () => {
-    const input = await parseJson(context.req.raw, registerConfirmSchema);
-    const ip = clientIp(context.req.raw);
-    assertVerificationAllowed(ip, input.setupToken);
-    let result: IdentityResult;
-    try {
-      result = await confirmRegistration(
-        database,
-        encryptionKey,
-        input.setupToken,
-        input.code
-      );
-      clearVerificationFailures(ip, input.setupToken);
-    } catch (error) {
-      recordVerificationFailure(ip, input.setupToken);
-      throw error;
-    }
     return {
       user: result.user,
       credentialToken: result.credentialToken,
-      recoveryCode: result.recoveryCode,
-    };
-  })
-);
-
-app.post("/api/identity/recover/start", async (context) =>
-  route(context, async () => {
-    const input = await parseJson(context.req.raw, recoverStartSchema);
-    return startRecovery(
-      input.username,
-      deviceKindFromUserAgent(context.req.header("user-agent") ?? "")
-    );
-  })
-);
-
-app.post("/api/identity/recover/confirm", async (context) =>
-  route(context, async () => {
-    const input = await parseJson(context.req.raw, recoverConfirmSchema);
-    const ip = clientIp(context.req.raw);
-    assertVerificationAllowed(ip, input.challengeId);
-    let result: IdentityResult;
-    try {
-      result = await confirmRecovery(
-        database,
-        encryptionKey,
-        input.challengeId,
-        input.code
-      );
-      clearVerificationFailures(ip, input.challengeId);
-    } catch (error) {
-      recordVerificationFailure(ip, input.challengeId);
-      throw error;
-    }
-    realtime?.revokeUser(result.user.id);
-    return {
-      user: result.user,
-      credentialToken: result.credentialToken,
-      migrated: true,
     };
   })
 );
 
 app.use("/api/*", async (context, next) => {
-  const publicIdentityPaths = new Set([
-    "/api/identity/register/start",
-    "/api/identity/register/confirm",
-    "/api/identity/recover/start",
-    "/api/identity/recover/confirm",
-  ]);
+  const publicIdentityPaths = new Set(["/api/identity/ensure"]);
   if (publicIdentityPaths.has(context.req.path)) {
     await next();
     return;
@@ -218,19 +138,6 @@ app.get("/api/discover", (context) =>
       realtime.onlineUserIds()
     )
   )
-);
-
-app.post("/api/identity/recovery-code", async (context) =>
-  route(context, async () => {
-    const input = await parseJson(context.req.raw, recoveryCodeSchema);
-    const recoveryCode = await regenerateRecoveryCode(
-      database,
-      encryptionKey,
-      context.get("user").id,
-      input.code
-    );
-    return { recoveryCode };
-  })
 );
 
 app.post("/api/rooms", (context) =>
@@ -310,6 +217,20 @@ app.get("/api/rooms/:roomId/messages", (context) =>
       context.req.query("cursor")
     )
   )
+);
+
+app.post("/api/rooms/:roomId/messages", async (context) =>
+  route(context, async () => {
+    const input = await parseJson(context.req.raw, textMessageSchema);
+    const roomId = context.req.param("roomId");
+    const message = createTextMessage(database, context.get("user"), {
+      roomId,
+      clientMessageId: input.clientMessageId,
+      body: input.body,
+    });
+    realtime.publishMessage(roomId, message);
+    return message;
+  })
 );
 
 app.use("/assets/*", serveStatic({ root: clientRoot }));
@@ -415,10 +336,4 @@ function hasMatchingOrigin(request: Request) {
   } catch {
     return false;
   }
-}
-
-function clientIp(request: Request) {
-  return (
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "local"
-  );
 }

@@ -35,6 +35,7 @@ import {
   getSocket,
   refreshBootstrap,
   setRoomDeletedHandler,
+  setRoomSummaryHandler,
   setTransferHandlers,
 } from "@/lib/socket";
 import { toast } from "@/lib/toast";
@@ -45,6 +46,7 @@ import type {
   RoomMember,
 } from "@/shared/types";
 import {
+  addMessage,
   appStore,
   bootstrapAtom,
   messageCursorsAtom,
@@ -76,18 +78,26 @@ export function RoomPage({ roomId }: { roomId: string }) {
   const messages = messagesByRoom[roomId] ?? [];
   const currentUserId = bootstrap?.user.id;
 
+  const loadRoomDetail = useCallback(async () => {
+    const detail = await api<RoomDetail | { missing: true }>(
+      `/api/rooms/${roomId}`
+    );
+    if ("missing" in detail) {
+      await navigate({ to: "/" });
+      return;
+    }
+    setRoom(detail);
+    setLoadedRoomId(roomId);
+    return detail;
+  }, [navigate, roomId]);
+
   const loadRoom = useCallback(async () => {
     setLoadingRoom(true);
     try {
-      const detail = await api<RoomDetail | { missing: true }>(
-        `/api/rooms/${roomId}`
-      );
-      if ("missing" in detail) {
-        await navigate({ to: "/" });
+      const detail = await loadRoomDetail();
+      if (!detail) {
         return;
       }
-      setRoom(detail);
-      setLoadedRoomId(roomId);
       if (detail.membership === "member") {
         const page = await api<MessagePage>(`/api/rooms/${roomId}/messages`);
         appStore.set(messagesAtom, (current) => ({
@@ -107,7 +117,7 @@ export function RoomPage({ roomId }: { roomId: string }) {
     } finally {
       setLoadingRoom(false);
     }
-  }, [navigate, roomId]);
+  }, [loadRoomDetail, navigate, roomId]);
 
   useEffect(() => {
     if (currentUserId) {
@@ -144,12 +154,18 @@ export function RoomPage({ roomId }: { roomId: string }) {
           void navigate({ to: "/" });
         }
       });
+      setRoomSummaryHandler((summary) => {
+        if (summary.id === roomId) {
+          void loadRoomDetail();
+        }
+      });
     }
     return () => {
       setTransferHandlers(undefined, undefined);
       setRoomDeletedHandler(undefined);
+      setRoomSummaryHandler(undefined);
     };
-  }, [currentUserId, loadRoom, navigate, roomId]);
+  }, [currentUserId, loadRoom, loadRoomDetail, navigate, roomId]);
 
   if (loading || !bootstrap) {
     return (
@@ -800,30 +816,27 @@ function Composer({
 }) {
   const [value, setValue] = useState("");
   const [sending, setSending] = useState(false);
-  function send() {
+  const canSend = Boolean(value.trim() && !sending);
+  async function send() {
     const body = value.trim();
-    if (!(body && connected)) {
+    if (!(body && !sending)) {
       return;
     }
     setSending(true);
-    getSocket()
-      .timeout(5000)
-      .emit(
-        "message:create",
-        { roomId, clientMessageId: crypto.randomUUID(), body },
-        (error, result) => {
-          setSending(false);
-          if (error || !result.ok) {
-            toast.error(
-              result?.ok === false
-                ? result.error.message
-                : "Message wasn't sent"
-            );
-            return;
-          }
-          setValue("");
-        }
+    try {
+      const message = await post<ChatMessage>(`/api/rooms/${roomId}/messages`, {
+        clientMessageId: crypto.randomUUID(),
+        body,
+      });
+      addMessage(message);
+      setValue("");
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Message wasn't sent"
       );
+    } finally {
+      setSending(false);
+    }
   }
   return (
     <footer className="shrink-0 border-default-200 border-t bg-white p-3 sm:p-4">
@@ -874,6 +887,7 @@ function Composer({
         <motion.div whileTap={{ scale: 0.9 }}>
           <Button
             aria-label="Send message"
+            isDisabled={!canSend}
             isIconOnly
             isPending={sending}
             onPress={send}

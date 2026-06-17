@@ -7,8 +7,8 @@ bytes move directly between browsers over WebRTC DataChannel.
 ## Requirements
 
 - Bun 1.3+
-- Internet access when using the hostc tunnel
-- Devices on the same local network for direct file transfer
+- Portless LAN mode serving `http://quick.local:1355`
+- Devices on the same local network
 
 ## Setup
 
@@ -17,21 +17,6 @@ Install dependencies:
 ```bash
 bun install
 ```
-
-Generate the identity encryption key:
-
-```bash
-bun run keygen
-```
-
-Create `.env.local`:
-
-```env
-IDENTITY_ENCRYPTION_KEY=<generated Base64 key>
-```
-
-Keep this key with database backups. Existing authenticator identities cannot
-be verified if it is lost.
 
 ## Development
 
@@ -42,32 +27,32 @@ bun run dev
 ```
 
 Open the Vite URL printed in the terminal. Development mode does not start
-hostc.
+Portless.
 
-## Public HTTPS tunnel
+## LAN Access
 
-Build and run Quick Send with hostc:
+Build and run Quick Send:
 
 ```bash
 bun run start
 ```
 
-The start script builds the web app, starts the local Bun server on port
-`4173`, then hostc prints a temporary public HTTPS URL such as:
+The start script builds the web app, starts the local Bun server on the
+internal port `4173`, then prints the fixed LAN URL:
 
 ```text
-https://t-a1b2c3d4.hostc.dev
+http://quick.local:1355
 ```
 
-The terminal also displays a compact QR code for the public URL, so mobile
+The terminal also displays a compact QR code for the LAN URL, so mobile
 devices can open Quick Send by scanning it.
 
-Override the local port with `QUICK_SEND_PORT`.
+Override the internal app port with `QUICK_SEND_PORT` only if your Portless LAN
+route points somewhere else. Override the printed LAN URL with
+`QUICK_SEND_LAN_URL` if needed.
 
-hostc anonymous tunnels are temporary. Restarting or reconnecting may produce
-a different URL. Browser storage is isolated by origin, so a new hostc URL
-cannot read the credential stored by the old URL. Use the MFA recovery flow to
-restore the same user on the new URL.
+Portless LAN mode keeps the browser origin stable at `quick.local:1355`, so
+localStorage credentials keep working across restarts.
 
 Credentials are stored in browser localStorage and sent as Bearer tokens for
 API requests and Socket.IO authentication. Quick Send does not use cookies.
@@ -87,8 +72,7 @@ gate for pushes and pull requests.
 ## Data
 
 SQLite data is stored in `data/quick-send.sqlite`. Stop the service before
-copying a backup, and back up `.env.local` separately. The database uses WAL;
-copying only the main database file while the service is running is not a safe
-backup.
+copying a backup. The database uses WAL; copying only the main database file
+while the service is running is not a safe backup.
 
 See [docs/plan.md](docs/plan.md) for the complete product and protocol contract.

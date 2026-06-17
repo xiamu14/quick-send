@@ -14,7 +14,7 @@ import {
   upsertRoomSummary,
 } from "@/store/app";
 import { ApiError, api } from "./api";
-import { clearCredential, getCredential } from "./credential";
+import { getCredential } from "./credential";
 import { toast } from "./toast";
 
 export type AppSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
@@ -22,6 +22,9 @@ export type AppSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 let socket: AppSocket | undefined;
 let socketCredential: string | undefined;
 let onRoomDeleted: ((roomId: string) => void) | undefined;
+let onRoomSummary:
+  | ((summary: BootstrapPayload["rooms"][number]) => void)
+  | undefined;
 let onTransferLocked:
   | ((payload: Parameters<ServerToClientEvents["transfer:locked"]>[0]) => void)
   | undefined;
@@ -62,7 +65,10 @@ export function getSocket() {
   socket.on("connect_error", () => {
     appStore.set(socketConnectedAtom, false);
   });
-  socket.on("room:summary", upsertRoomSummary);
+  socket.on("room:summary", (summary) => {
+    upsertRoomSummary(summary);
+    onRoomSummary?.(summary);
+  });
   socket.on("room:deleted", ({ roomId }) => {
     removeRoom(roomId);
     onRoomDeleted?.(roomId);
@@ -79,12 +85,6 @@ export function getSocket() {
   ] as const) {
     socket.on(eventName, (payload) => onRtc?.(eventName, payload));
   }
-  socket.on("identity:revoked", () => {
-    clearCredential();
-    appStore.set(bootstrapAtom, null);
-    disconnectSocket();
-    window.location.assign("/recover");
-  });
   return socket;
 }
 
@@ -98,6 +98,12 @@ export function setRoomDeletedHandler(
   handler: ((roomId: string) => void) | undefined
 ) {
   onRoomDeleted = handler;
+}
+
+export function setRoomSummaryHandler(
+  handler: ((summary: BootstrapPayload["rooms"][number]) => void) | undefined
+) {
+  onRoomSummary = handler;
 }
 
 export function setTransferHandlers(

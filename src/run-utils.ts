@@ -4,6 +4,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { spawn } from "bun";
 
 export const serverPort = Number(process.env.QUICK_SEND_PORT ?? 4173);
+export const lanUrl =
+  process.env.QUICK_SEND_LAN_URL ?? "http://quick.local:1355";
 const lockPath = join(process.cwd(), "data", "quick-send.lock");
 
 if (!Number.isInteger(serverPort) || serverPort < 1 || serverPort > 65_535) {
@@ -50,9 +52,13 @@ async function stopExistingServer(path: string, port: number) {
     () => undefined
   );
   if (!response) {
-    throw new Error(
-      `PID ${pid} owns the Quick Send lock but port ${port} is unavailable`
+    console.log(
+      `Removing stale Quick Send lock for PID ${pid}; port ${port} is unavailable`
     );
+    if (existsSync(path)) {
+      unlinkSync(path);
+    }
+    return;
   }
   console.log(`Stopping existing Quick Send PID ${pid}`);
   process.kill(pid, "SIGTERM");
@@ -61,7 +67,15 @@ async function stopExistingServer(path: string, port: number) {
     await delay(100);
   }
   if (isRunning(pid)) {
-    throw new Error(`Quick Send PID ${pid} did not stop`);
+    console.log(`Force stopping Quick Send PID ${pid}`);
+    process.kill(pid, "SIGKILL");
+    const forceDeadline = Date.now() + 2000;
+    while (isRunning(pid) && Date.now() < forceDeadline) {
+      await delay(100);
+    }
+  }
+  if (isRunning(pid)) {
+    throw new Error(`Quick Send PID ${pid} did not stop after SIGKILL`);
   }
   if (existsSync(path)) {
     unlinkSync(path);

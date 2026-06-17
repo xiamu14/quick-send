@@ -3,7 +3,6 @@ import {
   Button,
   Card,
   Chip,
-  Input,
   Modal,
   Popover,
   PopoverContent,
@@ -14,17 +13,11 @@ import {
 import { Link, useNavigate } from "@tanstack/react-router";
 import { motion } from "framer-motion";
 import { useAtomValue } from "jotai";
-import {
-  BellIcon,
-  CompassIcon,
-  KeyRoundIcon,
-  PlusIcon,
-  UserRoundIcon,
-} from "lucide-react";
-import QRCode from "qrcode";
+import { BellIcon, CompassIcon, PlusIcon, UserRoundIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { api, post } from "@/lib/api";
+import { bootstrapWithIdentity } from "@/lib/identity";
 import { getSocket, refreshBootstrap } from "@/lib/socket";
 import { toast } from "@/lib/toast";
 import type { DiscoverRoom, JoinRequest, RoomSummary } from "@/shared/types";
@@ -41,17 +34,23 @@ export function useAuthenticatedBootstrap() {
       appStore.set(bootstrapLoadingAtom, false);
       getSocket();
     } else {
-      void refreshBootstrap().then((result) => {
-        if (!alive) {
-          return;
-        }
-        appStore.set(bootstrapLoadingAtom, false);
-        if (result) {
-          getSocket();
-        } else if (result === null) {
-          void navigate({ to: "/setup" });
-        }
-      });
+      void bootstrapWithIdentity()
+        .then((result) => {
+          if (!alive) {
+            return;
+          }
+          appStore.set(bootstrapLoadingAtom, false);
+          if (result) {
+            appStore.set(bootstrapAtom, result);
+            getSocket();
+          }
+        })
+        .catch(() => {
+          if (alive) {
+            appStore.set(bootstrapLoadingAtom, false);
+            void navigate({ to: "/" });
+          }
+        });
     }
     return () => {
       alive = false;
@@ -363,32 +362,6 @@ function RequestRow({ request }: { request: JoinRequest }) {
 
 function IdentityPopover() {
   const bootstrap = useAtomValue(bootstrapAtom);
-  const [qr, setQr] = useState("");
-  const [totp, setTotp] = useState("");
-  const [recoveryCode, setRecoveryCode] = useState("");
-  useEffect(() => {
-    void QRCode.toDataURL(window.location.origin, {
-      width: 200,
-      margin: 1,
-    }).then(setQr);
-  }, []);
-  async function generateRecoveryCode() {
-    if (totp.length !== 6) {
-      return;
-    }
-    try {
-      const result = await post<{ recoveryCode: string }>(
-        "/api/identity/recovery-code",
-        { code: totp }
-      );
-      setRecoveryCode(result.recoveryCode);
-      setTotp("");
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Verification failed"
-      );
-    }
-  }
   return (
     <ResponsivePopover
       contentClassName="w-72"
@@ -400,38 +373,17 @@ function IdentityPopover() {
       }
     >
       <div className="space-y-4">
-        {qr ? (
-          <img alt="Quick Send QR code" className="mx-auto size-44" src={qr} />
-        ) : null}
-        <div>
-          <div className="mb-3 flex items-center gap-2 font-medium text-sm">
-            <KeyRoundIcon size={17} />
-            New recovery code
-          </div>
-          {recoveryCode ? (
-            <div className="rounded-xl bg-accent-soft p-3 text-center font-mono text-accent-soft-foreground">
-              {recoveryCode}
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <Input
-                aria-label="Authenticator code"
-                fullWidth
-                onChange={(event) => setTotp(event.target.value)}
-                placeholder="Authenticator code"
-                value={totp}
-                variant="secondary"
-              />
-              <Button
-                fullWidth
-                onPress={generateRecoveryCode}
-                size="sm"
-                variant="outline"
-              >
-                Generate
-              </Button>
-            </div>
-          )}
+        <div className="rounded-xl bg-default-50 p-3">
+          <p className="text-default-500 text-xs">Your short ID</p>
+          <p className="mt-1 font-mono font-semibold text-lg">
+            {bootstrap?.user.username}
+          </p>
+        </div>
+        <div className="rounded-xl bg-default-50 p-3">
+          <p className="text-default-500 text-xs">Device</p>
+          <p className="mt-1 font-medium capitalize">
+            {bootstrap?.user.deviceKind}
+          </p>
         </div>
       </div>
     </ResponsivePopover>

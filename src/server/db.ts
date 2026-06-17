@@ -29,26 +29,24 @@ function migrate(database: Database) {
         "select version from schema_migrations order by version desc limit 1"
       )
       .get()?.version ?? 0;
-  if (current >= 1) {
-    return;
-  }
-  database.transaction(() => {
-    for (const table of [
-      "sessions",
-      "peers",
-      "messages",
-      "file_offers",
-      "config",
-    ]) {
-      database.exec(`drop table if exists ${table}`);
-    }
-    database.exec(`
+  if (current < 1) {
+    database.transaction(() => {
+      for (const table of [
+        "sessions",
+        "peers",
+        "messages",
+        "file_offers",
+        "config",
+      ]) {
+        database.exec(`drop table if exists ${table}`);
+      }
+      database.exec(`
       create table users (
         id text primary key,
         username text not null collate nocase unique,
         avatar_seed text not null,
         device_kind text not null,
-        totp_ciphertext text not null,
+        fingerprint_hash text unique,
         created_at integer not null
       );
 
@@ -58,12 +56,6 @@ function migrate(database: Database) {
         token_hash text not null unique,
         created_at integer not null,
         last_used_at integer not null
-      );
-
-      create table recovery_codes (
-        user_id text primary key references users(id) on delete cascade,
-        code_hash text not null,
-        created_at integer not null
       );
 
       create table rooms (
@@ -134,9 +126,80 @@ function migrate(database: Database) {
       create index offers_sender_status_idx
         on file_offers(sender_user_id, status);
     `);
+      database
+        .query(
+          "insert into schema_migrations(version, applied_at) values(1, ?)"
+        )
+        .run(Date.now());
+    })();
+  }
+  if (current < 2) {
+    migrateIdentityToV2(database);
     database
-      .query("insert into schema_migrations(version, applied_at) values(1, ?)")
+      .query("insert into schema_migrations(version, applied_at) values(2, ?)")
       .run(Date.now());
+  }
+  if (current < 3) {
+    pruneLegacyIdentityData(database);
+    database
+      .query("insert into schema_migrations(version, applied_at) values(3, ?)")
+      .run(Date.now());
+  }
+}
+
+function migrateIdentityToV2(database: Database) {
+  const columns = database
+    .query<{ name: string }, []>("pragma table_info(users)")
+    .all()
+    .map((column) => column.name);
+  if (!columns.includes("fingerprint_hash")) {
+    database.exec("alter table users add column fingerprint_hash text");
+  }
+  database.exec(
+    "create unique index if not exists users_fingerprint_hash_idx on users(fingerprint_hash)"
+  );
+  database.exec("drop table if exists recovery_codes");
+}
+
+function pruneLegacyIdentityData(database: Database) {
+  database.transaction(() => {
+    database.exec(`
+      delete from rooms
+      where creator_id in (
+        select id from users where fingerprint_hash is null
+      );
+
+      delete from file_offers
+      where sender_user_id in (
+        select id from users where fingerprint_hash is null
+      )
+      or receiver_user_id in (
+        select id from users where fingerprint_hash is null
+      );
+
+      delete from messages
+      where sender_user_id in (
+        select id from users where fingerprint_hash is null
+      );
+
+      delete from join_requests
+      where requester_id in (
+        select id from users where fingerprint_hash is null
+      );
+
+      delete from room_members
+      where user_id in (
+        select id from users where fingerprint_hash is null
+      );
+
+      delete from credentials
+      where user_id in (
+        select id from users where fingerprint_hash is null
+      );
+
+      delete from users
+      where fingerprint_hash is null;
+    `);
   })();
 }
 

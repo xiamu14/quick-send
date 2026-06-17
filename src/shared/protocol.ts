@@ -53,7 +53,6 @@ export type ServerToClientEvents = {
   "rtc:offer": (payload: RtcServerPayload) => void;
   "rtc:answer": (payload: RtcServerPayload) => void;
   "rtc:candidate": (payload: RtcServerPayload) => void;
-  "identity:revoked": () => void;
 };
 
 export type ClientToServerEvents = {

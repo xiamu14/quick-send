@@ -1,18 +1,10 @@
+import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
-import { decodeBase32IgnorePadding } from "@oslojs/encoding";
-import { generateTOTP } from "@oslojs/otp";
 import type { User } from "@/shared/types";
 import { type AppDatabase, openDatabase } from "./db";
-import {
-  confirmRecovery,
-  confirmRegistration,
-  normalizeUsername,
-  resolveCredential,
-  startRecovery,
-  startRegistration,
-} from "./identity";
+import { ensureIdentity, resolveCredential } from "./identity";
 import { createTextMessage, listMessages } from "./messages";
 import {
   createRoom,
@@ -23,7 +15,7 @@ import {
 } from "./rooms";
 
 const databases: Array<{ database: AppDatabase; path: string }> = [];
-const recoveryCodePattern = /^[2-9A-HJ-NP-Z]{4}(?:-[2-9A-HJ-NP-Z]{4}){2}$/;
+const shortIdPattern = /^[2-9A-HJ-NP-Z]{4,6}$/;
 
 afterEach(() => {
   for (const item of databases.splice(0)) {
@@ -35,60 +27,54 @@ afterEach(() => {
 });
 
 describe("identity", () => {
-  test("registers a TOTP identity and resolves its credential", async () => {
+  test("creates a fingerprint identity and resolves its credential", async () => {
     const { database } = createTestDatabase();
-    const encryptionKey = crypto.getRandomValues(new Uint8Array(32));
-    const setup = startRegistration(database, "  Ada  Lovelace ", "desktop");
-    const code = generateTOTP(decodeBase32IgnorePadding(setup.secret), 30, 6);
-    const result = await confirmRegistration(
-      database,
-      encryptionKey,
-      setup.setupToken,
-      code
-    );
-    expect(result.user.username).toBe("Ada Lovelace");
-    expect(result.recoveryCode).toMatch(recoveryCodePattern);
+    const result = await ensureIdentity(database, "visitor-a", "desktop");
+    expect(result.user.id).toMatch(shortIdPattern);
+    expect(result.user.username).toBe(result.user.id);
     expect(
       await resolveCredential(database, result.credentialToken)
     ).toMatchObject({
       id: result.user.id,
-      username: "Ada Lovelace",
+      username: result.user.username,
     });
   });
 
-  test("rejects invalid usernames", () => {
-    expect(() => normalizeUsername("a")).toThrow();
-    expect(() => normalizeUsername("bad/name")).toThrow();
-  });
-
-  test("recovers an identity with one MFA challenge", async () => {
+  test("returns the same user for the same fingerprint", async () => {
     const { database } = createTestDatabase();
-    const encryptionKey = crypto.getRandomValues(new Uint8Array(32));
-    const setup = startRegistration(database, "Ada", "desktop");
-    const code = generateTOTP(decodeBase32IgnorePadding(setup.secret), 30, 6);
-    const registered = await confirmRegistration(
-      database,
-      encryptionKey,
-      setup.setupToken,
-      code
-    );
-    const challenge = startRecovery("Ada", "mobile");
-    const recovered = await confirmRecovery(
-      database,
-      encryptionKey,
-      challenge.challengeId,
-      code
-    );
+    const first = await ensureIdentity(database, "visitor-a", "desktop");
+    const second = await ensureIdentity(database, "visitor-a", "mobile");
 
     expect(
-      await resolveCredential(database, registered.credentialToken)
+      await resolveCredential(database, first.credentialToken)
     ).toBeUndefined();
     expect(
-      await resolveCredential(database, recovered.credentialToken)
+      await resolveCredential(database, second.credentialToken)
     ).toMatchObject({
-      id: registered.user.id,
+      id: first.user.id,
       deviceKind: "mobile",
     });
+  });
+
+  test("prunes legacy MFA identities and rooms during migration", () => {
+    const path = testDatabasePath();
+    seedLegacyV2Database(path);
+    const database = openDatabase(path);
+    databases.push({ database, path });
+
+    expect(
+      database
+        .query<{ count: number }, []>(
+          "select count(*) as count from users where fingerprint_hash is null"
+        )
+        .get()?.count
+    ).toBe(0);
+    expect(
+      database
+        .query<{ name: string }, []>("select name from rooms")
+        .all()
+        .map((room) => room.name)
+    ).toEqual(["New room"]);
   });
 });
 
@@ -151,13 +137,110 @@ describe("rooms and messages", () => {
 });
 
 function createTestDatabase() {
-  const path = join(
-    process.env.TMPDIR ?? "/tmp",
-    `quick-send-${crypto.randomUUID()}.sqlite`
-  );
+  const path = testDatabasePath();
   const database = openDatabase(path);
   databases.push({ database, path });
   return { database, path };
+}
+
+function testDatabasePath() {
+  return join(
+    process.env.TMPDIR ?? "/tmp",
+    `quick-send-${crypto.randomUUID()}.sqlite`
+  );
+}
+
+function seedLegacyV2Database(path: string) {
+  const database = new Database(path, { create: true });
+  database.exec(`
+    pragma foreign_keys = ON;
+
+    create table schema_migrations (
+      version integer primary key,
+      applied_at integer not null
+    );
+    insert into schema_migrations(version, applied_at) values(1, 1), (2, 2);
+
+    create table users (
+      id text primary key,
+      username text not null collate nocase unique,
+      avatar_seed text not null,
+      device_kind text not null,
+      fingerprint_hash text unique,
+      created_at integer not null
+    );
+
+    create table credentials (
+      id text primary key,
+      user_id text not null unique references users(id) on delete cascade,
+      token_hash text not null unique,
+      created_at integer not null,
+      last_used_at integer not null
+    );
+
+    create table rooms (
+      id text primary key,
+      name text not null,
+      creator_id text not null references users(id),
+      created_at integer not null
+    );
+
+    create table room_members (
+      room_id text not null references rooms(id) on delete cascade,
+      user_id text not null references users(id) on delete cascade,
+      joined_at integer not null,
+      primary key(room_id, user_id)
+    );
+
+    create table join_requests (
+      id text primary key,
+      room_id text not null references rooms(id) on delete cascade,
+      requester_id text not null references users(id) on delete cascade,
+      status text not null,
+      created_at integer not null,
+      resolved_at integer,
+      unique(room_id, requester_id)
+    );
+
+    create table file_offers (
+      id text primary key,
+      room_id text not null references rooms(id) on delete cascade,
+      sender_user_id text not null references users(id),
+      receiver_user_id text references users(id),
+      status text not null,
+      updated_at integer not null
+    );
+
+    create table messages (
+      id text primary key,
+      room_id text not null references rooms(id) on delete cascade,
+      sender_user_id text not null references users(id),
+      file_offer_id text references file_offers(id) on delete cascade
+    );
+
+    create table audit_logs (
+      id text primary key,
+      actor_user_id text references users(id) on delete set null,
+      room_id text references rooms(id) on delete set null,
+      action text not null,
+      created_at integer not null
+    );
+
+    insert into users(
+      id, username, avatar_seed, device_kind, fingerprint_hash, created_at
+    ) values
+      ('legacy-user', 'mac-air', 'legacy-seed', 'desktop', null, 1),
+      ('fingerprint-user', 'ABCD', 'fingerprint-seed', 'desktop', 'hash', 2);
+
+    insert into rooms(id, name, creator_id, created_at) values
+      ('legacy-room', 'Old room', 'legacy-user', 1),
+      ('fingerprint-room', 'New room', 'fingerprint-user', 2);
+
+    insert into room_members(room_id, user_id, joined_at) values
+      ('legacy-room', 'legacy-user', 1),
+      ('fingerprint-room', 'fingerprint-user', 2);
+  `);
+  database.close();
 }
 
 function insertUser(database: AppDatabase, username: string): User {
@@ -171,8 +254,8 @@ function insertUser(database: AppDatabase, username: string): User {
   database
     .query(
       `insert into users(
-        id, username, avatar_seed, device_kind, totp_ciphertext, created_at
-      ) values(?, ?, ?, ?, 'test', ?)`
+        id, username, avatar_seed, device_kind, fingerprint_hash, created_at
+      ) values(?, ?, ?, ?, null, ?)`
     )
     .run(
       user.id,

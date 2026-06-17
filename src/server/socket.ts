@@ -13,7 +13,7 @@ import {
   transferReceiveSchema,
   transferStatusSchema,
 } from "@/shared/protocol";
-import type { User } from "@/shared/types";
+import type { ChatMessage, User } from "@/shared/types";
 import type { AppDatabase } from "./db";
 import { AppError } from "./errors";
 import { resolveCredential } from "./identity";
@@ -88,8 +88,7 @@ export function createRealtimeHub(
       handleAck(ack, () => {
         const input = parsePayload(messageCreateSchema, payload);
         const message = createTextMessage(database, user, input);
-        io.to(`room:${input.roomId}`).emit("message:created", message);
-        emitRoomSummary(input.roomId);
+        publishMessage(input.roomId, message);
         return message;
       });
     });
@@ -98,8 +97,7 @@ export function createRealtimeHub(
       handleAck(ack, () => {
         const input = parsePayload(fileCreateSchema, payload);
         const message = createFileMessage(database, user, socket.id, input);
-        io.to(`room:${input.roomId}`).emit("message:created", message);
-        emitRoomSummary(input.roomId);
+        publishMessage(input.roomId, message);
         return message;
       });
     });
@@ -242,19 +240,19 @@ export function createRealtimeHub(
     io.in(`room:${roomId}`).socketsLeave(`room:${roomId}`);
   }
 
-  function revokeUser(userId: string) {
-    io.to(`user:${userId}`).emit("identity:revoked");
-    io.in(`user:${userId}`).disconnectSockets(true);
+  function publishMessage(roomId: string, message: ChatMessage) {
+    io.to(`room:${roomId}`).emit("message:created", message);
+    emitRoomSummary(roomId);
   }
 
   return {
     io,
     onlineUserIds,
     emitRoomSummary,
+    publishMessage,
     notifyJoinRequest,
     joinUserToRoom,
     deleteRoom,
-    revokeUser,
     close: () =>
       new Promise<void>((resolve) => {
         io.close(() => resolve());
