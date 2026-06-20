@@ -56,6 +56,9 @@ localStorage credentials keep working across restarts.
 
 Credentials are stored in browser localStorage and sent as Bearer tokens for
 API requests and Socket.IO authentication. Quick Send does not use cookies.
+FingerprintJS provides the stable visitor identifier used to recover the same
+device identity. The UI also shows a readable device name derived from the
+User-Agent, such as `vivo V2338A`, `Mac OS` or `iPhone`.
 
 Rooms are visible to other devices only while their creator is online. A
 30-second disconnect grace period prevents brief backgrounding or network

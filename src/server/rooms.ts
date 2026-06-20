@@ -280,11 +280,13 @@ export function getRoomDetail(
             username: string;
             avatar_seed: string;
             device_kind: User["deviceKind"];
+            device_name: string;
             created_at: number;
           },
           [string]
         >(
-          `select u.id, u.username, u.avatar_seed, u.device_kind, u.created_at
+          `select u.id, u.username, u.avatar_seed, u.device_kind,
+            u.device_name, u.created_at
            from room_members rm join users u on u.id = rm.user_id
            where rm.room_id = ? order by rm.joined_at`
         )
@@ -294,6 +296,7 @@ export function getRoomDetail(
           username: member.username,
           avatarSeed: member.avatar_seed,
           deviceKind: member.device_kind,
+          deviceName: member.device_name,
           createdAt: member.created_at,
           online: onlineUserIds.has(member.id),
           isCreator: member.id === room.creator_id,
@@ -493,6 +496,7 @@ export function listPendingRequests(
         requester_id: string;
         requester_username: string;
         requester_device_kind: User["deviceKind"];
+        requester_device_name: string;
         status: JoinRequest["status"];
         created_at: number;
       },
@@ -500,7 +504,8 @@ export function listPendingRequests(
     >(
       `select jr.id, jr.room_id, r.name as room_name,
         jr.requester_id, u.username as requester_username,
-        u.device_kind as requester_device_kind, jr.status, jr.created_at
+        u.device_kind as requester_device_kind,
+        u.device_name as requester_device_name, jr.status, jr.created_at
        from join_requests jr
        join rooms r on r.id = jr.room_id
        join users u on u.id = jr.requester_id
@@ -515,6 +520,7 @@ export function listPendingRequests(
       requesterId: row.requester_id,
       requesterUsername: row.requester_username,
       requesterDeviceKind: row.requester_device_kind,
+      requesterDeviceName: row.requester_device_name,
       status: row.status,
       createdAt: row.created_at,
     }));

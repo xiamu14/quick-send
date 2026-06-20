@@ -156,6 +156,14 @@ function migrate(database: Database) {
       .query("insert into schema_migrations(version, applied_at) values(5, ?)")
       .run(Date.now());
   }
+  if (current < 6) {
+    database.exec(
+      "alter table users add column device_name text not null default 'Unknown device'"
+    );
+    database
+      .query("insert into schema_migrations(version, applied_at) values(6, ?)")
+      .run(Date.now());
+  }
 }
 
 function migrateIdentityToV2(database: Database) {

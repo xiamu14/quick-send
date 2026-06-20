@@ -380,7 +380,7 @@ function MemberRow({ member }: { member: RoomMember }) {
         <p className="truncate font-medium">{member.username}</p>
         <p className="text-default-500 text-xs">
           {member.isCreator ? "Creator · " : ""}
-          {member.online ? "Online" : "Offline"}
+          {member.deviceName} · {member.online ? "Online" : "Offline"}
         </p>
       </div>
     </div>

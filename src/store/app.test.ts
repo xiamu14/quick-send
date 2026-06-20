@@ -10,6 +10,7 @@ describe("app store", () => {
         username: "Ada",
         avatarSeed: "seed",
         deviceKind: "desktop",
+        deviceName: "Mac OS",
         createdAt: 1,
       },
       rooms: [],

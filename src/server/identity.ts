@@ -6,6 +6,16 @@ const credentialMaxIdleMs = 90 * 24 * 60 * 60 * 1000;
 const shortIdAlphabet = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 const tabletPattern = /ipad|tablet/i;
 const mobilePattern = /mobile|iphone|android/i;
+const androidPattern = /android/i;
+const androidModelPattern = /android[^;)]*;\s*([^;)]+?)(?:\s+build\/|[;)])/i;
+const androidBrandPattern =
+  /\b(vivo|oppo|oneplus|xiaomi|redmi|huawei|honor|samsung|realme|pixel)\b/i;
+const iphonePattern = /iphone/i;
+const ipadPattern = /ipad/i;
+const macPattern = /macintosh|mac os x/i;
+const windowsPattern = /windows/i;
+const linuxPattern = /linux/i;
+const localePrefixPattern = /^[a-z]{2}[-_][a-z]{2};\s*/i;
 
 export type IdentityResult = {
   user: User;
@@ -22,10 +32,41 @@ export function deviceKindFromUserAgent(userAgent: string): DeviceKind {
   return "desktop";
 }
 
+export function deviceNameFromUserAgent(userAgent: string) {
+  if (iphonePattern.test(userAgent)) {
+    return "iPhone";
+  }
+  if (ipadPattern.test(userAgent)) {
+    return "iPad";
+  }
+  if (macPattern.test(userAgent)) {
+    return "Mac OS";
+  }
+  if (windowsPattern.test(userAgent)) {
+    return "Windows";
+  }
+  if (androidPattern.test(userAgent)) {
+    const brand = userAgent.match(androidBrandPattern)?.[1];
+    const model = userAgent
+      .match(androidModelPattern)?.[1]
+      ?.replace(localePrefixPattern, "")
+      .trim();
+    if (brand && model && !model.toLowerCase().includes(brand.toLowerCase())) {
+      return `${brand} ${model}`;
+    }
+    return model || (brand ? `${brand} Android` : "Android");
+  }
+  if (linuxPattern.test(userAgent)) {
+    return "Linux";
+  }
+  return "Unknown device";
+}
+
 export async function ensureIdentity(
   database: AppDatabase,
   visitorId: string,
-  deviceKind: DeviceKind
+  deviceKind: DeviceKind,
+  deviceName = "Unknown device"
 ): Promise<IdentityResult> {
   const fingerprintHash = await hashToken(visitorId.trim());
   const existing = database
@@ -35,6 +76,7 @@ export async function ensureIdentity(
         username: string;
         avatar_seed: string;
         device_kind: DeviceKind;
+        device_name: string;
         created_at: number;
       },
       [string]
@@ -42,12 +84,16 @@ export async function ensureIdentity(
     .get(fingerprintHash);
   const user = existing
     ? mapUser(existing)
-    : createFingerprintUser(database, fingerprintHash, deviceKind);
-  if (existing && existing.device_kind !== deviceKind) {
+    : createFingerprintUser(database, fingerprintHash, deviceKind, deviceName);
+  if (
+    existing &&
+    (existing.device_kind !== deviceKind || existing.device_name !== deviceName)
+  ) {
     database
-      .query("update users set device_kind = ? where id = ?")
-      .run(deviceKind, existing.id);
+      .query("update users set device_kind = ?, device_name = ? where id = ?")
+      .run(deviceKind, deviceName, existing.id);
     user.deviceKind = deviceKind;
+    user.deviceName = deviceName;
   }
   const credentialToken = randomToken();
   const credentialHash = await hashToken(credentialToken);
@@ -81,6 +127,7 @@ export async function resolveCredential(
         username: string;
         avatar_seed: string;
         device_kind: DeviceKind;
+        device_name: string;
         created_at: number;
       },
       [string]
@@ -111,10 +158,29 @@ export function cleanupIdentityState(database: AppDatabase) {
     .run(Date.now() - credentialMaxIdleMs);
 }
 
+export function updateUserDeviceFromUserAgent(
+  database: AppDatabase,
+  user: User,
+  userAgent: string
+) {
+  const deviceKind = deviceKindFromUserAgent(userAgent);
+  const deviceName = deviceNameFromUserAgent(userAgent);
+  if (user.deviceKind === deviceKind && user.deviceName === deviceName) {
+    return user;
+  }
+  database
+    .query("update users set device_kind = ?, device_name = ? where id = ?")
+    .run(deviceKind, deviceName, user.id);
+  user.deviceKind = deviceKind;
+  user.deviceName = deviceName;
+  return user;
+}
+
 function createFingerprintUser(
   database: AppDatabase,
   fingerprintHash: string,
-  deviceKind: DeviceKind
+  deviceKind: DeviceKind,
+  deviceName: string
 ) {
   const now = Date.now();
   for (let attempt = 0; attempt < 20; attempt += 1) {
@@ -124,6 +190,7 @@ function createFingerprintUser(
       username: shortId,
       avatarSeed: randomToken(9),
       deviceKind,
+      deviceName,
       createdAt: now,
     };
     try {
@@ -150,8 +217,8 @@ function insertUser(
       .query(
         `insert into users(
           id, username, avatar_seed, device_kind, totp_ciphertext,
-          fingerprint_hash, created_at
-        ) values(?, ?, ?, ?, '', ?, ?)`
+          fingerprint_hash, device_name, created_at
+        ) values(?, ?, ?, ?, '', ?, ?, ?)`
       )
       .run(
         user.id,
@@ -159,6 +226,7 @@ function insertUser(
         user.avatarSeed,
         user.deviceKind,
         fingerprintHash,
+        user.deviceName,
         user.createdAt
       );
     return;
@@ -166,8 +234,9 @@ function insertUser(
   database
     .query(
       `insert into users(
-        id, username, avatar_seed, device_kind, fingerprint_hash, created_at
-      ) values(?, ?, ?, ?, ?, ?)`
+        id, username, avatar_seed, device_kind, fingerprint_hash,
+        device_name, created_at
+      ) values(?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       user.id,
@@ -175,6 +244,7 @@ function insertUser(
       user.avatarSeed,
       user.deviceKind,
       fingerprintHash,
+      user.deviceName,
       user.createdAt
     );
 }
@@ -200,6 +270,7 @@ function mapUser(row: {
   username: string;
   avatar_seed: string;
   device_kind: DeviceKind;
+  device_name: string;
   created_at: number;
 }) {
   return {
@@ -207,6 +278,7 @@ function mapUser(row: {
     username: row.username,
     avatarSeed: row.avatar_seed,
     deviceKind: row.device_kind,
+    deviceName: row.device_name,
     createdAt: row.created_at,
   } satisfies User;
 }

@@ -20,9 +20,11 @@ import {
 import {
   cleanupIdentityState,
   deviceKindFromUserAgent,
+  deviceNameFromUserAgent,
   ensureIdentity,
   type IdentityResult,
   resolveCredential,
+  updateUserDeviceFromUserAgent,
 } from "./identity";
 import {
   createFileMessage,
@@ -108,10 +110,12 @@ const filePrepareSchema = type({
 app.post("/api/identity/ensure", async (context) =>
   route(context, async () => {
     const input = await parseJson(context.req.raw, identityEnsureSchema);
+    const userAgent = context.req.header("user-agent") ?? "";
     const result: IdentityResult = await ensureIdentity(
       database,
       input.visitorId,
-      deviceKindFromUserAgent(context.req.header("user-agent") ?? "")
+      deviceKindFromUserAgent(userAgent),
+      deviceNameFromUserAgent(userAgent)
     );
     return {
       user: result.user,
@@ -142,7 +146,11 @@ app.use("/api/*", async (context, next) => {
 
 app.get("/api/bootstrap", (context) =>
   route(context, () => {
-    const user = context.get("user");
+    const user = updateUserDeviceFromUserAgent(
+      database,
+      context.get("user"),
+      context.req.header("user-agent") ?? ""
+    );
     return {
       user,
       rooms: listRoomSummaries(database, user.id, realtime.onlineUserIds()),

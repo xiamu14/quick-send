@@ -152,15 +152,24 @@ function insertUser(database: AppDatabase): User {
     username: `User-${crypto.randomUUID().slice(0, 8)}`,
     avatarSeed: crypto.randomUUID(),
     deviceKind: "desktop",
+    deviceName: "Mac OS",
     createdAt: now,
   };
   database
     .query(
       `insert into users(
-        id, username, avatar_seed, device_kind, fingerprint_hash, created_at
-      ) values(?, ?, ?, ?, null, ?)`
+        id, username, avatar_seed, device_kind, device_name,
+        fingerprint_hash, created_at
+      ) values(?, ?, ?, ?, ?, null, ?)`
     )
-    .run(user.id, user.username, user.avatarSeed, user.deviceKind, now);
+    .run(
+      user.id,
+      user.username,
+      user.avatarSeed,
+      user.deviceKind,
+      user.deviceName,
+      now
+    );
   return user;
 }
 

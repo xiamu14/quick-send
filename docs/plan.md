@@ -24,6 +24,11 @@ The service stores only a SHA-256 hash of the FingerprintJS visitor identifier.
 Credential tokens are stored as SHA-256 hashes and expire after 90 days without
 activity. Quick Send does not use cookies.
 
+The same FingerprintJS visitor identifier always resolves to the same device
+user, including after local credential loss. The service derives a readable
+device name from the latest User-Agent, stores it with the device kind and
+refreshes both values during bootstrap.
+
 ## Rooms
 
 - A user can own at most 5 rooms.

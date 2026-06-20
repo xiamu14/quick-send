@@ -334,7 +334,7 @@ function RequestRow({ request }: { request: JoinRequest }) {
     <div className="rounded-2xl bg-default-50 p-3">
       <p className="font-medium">{request.requesterUsername}</p>
       <p className="text-default-500 text-xs">
-        {request.roomName} · {request.requesterDeviceKind}
+        {request.roomName} · {request.requesterDeviceName}
       </p>
       <div className="mt-3 flex gap-2">
         <Button
@@ -381,7 +381,8 @@ function IdentityPopover() {
         </div>
         <div className="rounded-xl bg-default-50 p-3">
           <p className="text-default-500 text-xs">Device</p>
-          <p className="mt-1 font-medium capitalize">
+          <p className="mt-1 font-medium">{bootstrap?.user.deviceName}</p>
+          <p className="text-default-500 text-xs capitalize">
             {bootstrap?.user.deviceKind}
           </p>
         </div>

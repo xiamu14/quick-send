@@ -4,7 +4,11 @@ import { rmSync } from "node:fs";
 import { join } from "node:path";
 import type { User } from "@/shared/types";
 import { type AppDatabase, openDatabase } from "./db";
-import { ensureIdentity, resolveCredential } from "./identity";
+import {
+  deviceNameFromUserAgent,
+  ensureIdentity,
+  resolveCredential,
+} from "./identity";
 import { createTextMessage, listMessages } from "./messages";
 import {
   createRoom,
@@ -29,6 +33,20 @@ afterEach(() => {
 });
 
 describe("identity", () => {
+  test.each([
+    [
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+      "Mac OS",
+    ],
+    [
+      "Mozilla/5.0 (Linux; Android 14; vivo V2338A Build/UP1A) AppleWebKit/537.36 Mobile",
+      "vivo V2338A",
+    ],
+    ["Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)", "iPhone"],
+  ])("extracts a readable device name from UA", (userAgent, expected) => {
+    expect(deviceNameFromUserAgent(userAgent)).toBe(expected);
+  });
+
   test("creates a fingerprint identity and resolves its credential", async () => {
     const { database } = createTestDatabase();
     const result = await ensureIdentity(database, "visitor-a", "desktop");
@@ -44,8 +62,18 @@ describe("identity", () => {
 
   test("returns the same user for the same fingerprint", async () => {
     const { database } = createTestDatabase();
-    const first = await ensureIdentity(database, "visitor-a", "desktop");
-    const second = await ensureIdentity(database, "visitor-a", "mobile");
+    const first = await ensureIdentity(
+      database,
+      "visitor-a",
+      "desktop",
+      "Mac OS"
+    );
+    const second = await ensureIdentity(
+      database,
+      "visitor-a",
+      "mobile",
+      "vivo V2338A"
+    );
 
     expect(
       await resolveCredential(database, first.credentialToken)
@@ -55,6 +83,7 @@ describe("identity", () => {
     ).toMatchObject({
       id: first.user.id,
       deviceKind: "mobile",
+      deviceName: "vivo V2338A",
     });
   });
 
@@ -378,19 +407,22 @@ function insertUser(database: AppDatabase, username: string): User {
     username,
     avatarSeed: crypto.randomUUID(),
     deviceKind: "desktop",
+    deviceName: "Mac OS",
     createdAt: Date.now(),
   };
   database
     .query(
       `insert into users(
-        id, username, avatar_seed, device_kind, fingerprint_hash, created_at
-      ) values(?, ?, ?, ?, null, ?)`
+        id, username, avatar_seed, device_kind, device_name,
+        fingerprint_hash, created_at
+      ) values(?, ?, ?, ?, ?, null, ?)`
     )
     .run(
       user.id,
       user.username,
       user.avatarSeed,
       user.deviceKind,
+      user.deviceName,
       user.createdAt
     );
   return user;

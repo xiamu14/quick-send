@@ -5,6 +5,7 @@ export type User = {
   username: string;
   avatarSeed: string;
   deviceKind: DeviceKind;
+  deviceName: string;
   createdAt: number;
 };
 
@@ -38,6 +39,7 @@ export type JoinRequest = {
   requesterId: string;
   requesterUsername: string;
   requesterDeviceKind: DeviceKind;
+  requesterDeviceName: string;
   status: "pending" | "approved" | "rejected" | "expired";
   createdAt: number;
 };
