@@ -8,9 +8,9 @@ import {
   addMessage,
   appStore,
   bootstrapAtom,
+  removeMessage,
   removeRoom,
   socketConnectedAtom,
-  updateOffer,
   upsertRoomSummary,
 } from "@/store/app";
 import { ApiError, api } from "./api";
@@ -24,15 +24,6 @@ let socketCredential: string | undefined;
 let onRoomDeleted: ((roomId: string) => void) | undefined;
 let onRoomSummary:
   | ((summary: BootstrapPayload["rooms"][number]) => void)
-  | undefined;
-let onTransferLocked:
-  | ((payload: Parameters<ServerToClientEvents["transfer:locked"]>[0]) => void)
-  | undefined;
-let onRtc:
-  | ((
-      type: "rtc:offer" | "rtc:answer" | "rtc:candidate",
-      payload: Parameters<ServerToClientEvents["rtc:offer"]>[0]
-    ) => void)
   | undefined;
 
 export function getSocket() {
@@ -74,17 +65,18 @@ export function getSocket() {
     onRoomDeleted?.(roomId);
     toast("Room was deleted");
   });
+  socket.on("room:visibility", ({ roomId, visible }) => {
+    if (!visible) {
+      removeRoom(roomId);
+      onRoomDeleted?.(roomId);
+    }
+    void refreshBootstrap();
+  });
   socket.on("join-request:changed", () => void refreshBootstrap());
   socket.on("message:created", addMessage);
-  socket.on("file-offer:updated", updateOffer);
-  socket.on("transfer:locked", (payload) => onTransferLocked?.(payload));
-  for (const eventName of [
-    "rtc:offer",
-    "rtc:answer",
-    "rtc:candidate",
-  ] as const) {
-    socket.on(eventName, (payload) => onRtc?.(eventName, payload));
-  }
+  socket.on("message:deleted", ({ roomId, messageId }) => {
+    removeMessage(roomId, messageId);
+  });
   return socket;
 }
 
@@ -104,23 +96,6 @@ export function setRoomSummaryHandler(
   handler: ((summary: BootstrapPayload["rooms"][number]) => void) | undefined
 ) {
   onRoomSummary = handler;
-}
-
-export function setTransferHandlers(
-  locked:
-    | ((
-        payload: Parameters<ServerToClientEvents["transfer:locked"]>[0]
-      ) => void)
-    | undefined,
-  rtc:
-    | ((
-        type: "rtc:offer" | "rtc:answer" | "rtc:candidate",
-        payload: Parameters<ServerToClientEvents["rtc:offer"]>[0]
-      ) => void)
-    | undefined
-) {
-  onTransferLocked = locked;
-  onRtc = rtc;
 }
 
 export async function refreshBootstrap() {

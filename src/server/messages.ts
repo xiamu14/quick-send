@@ -1,11 +1,27 @@
-import type { ChatMessage, FileOffer, MessagePage, User } from "@/shared/types";
+import type {
+  ChatMessage,
+  FileAttachment,
+  MessagePage,
+  User,
+} from "@/shared/types";
 import type { AppDatabase } from "./db";
 import { AppError } from "./errors";
 import { hasRoomMembership, limits } from "./rooms";
 
 const messageLimit = 50;
-const offerTtlMs = 30 * 60 * 1000;
+const fileTtlMs = 3 * 24 * 60 * 60 * 1000;
 const maxPreviewLength = 280_000;
+const md5Pattern = /^[a-f0-9]{32}$/;
+
+export type FileMessageInput = {
+  roomId: string;
+  clientMessageId: string;
+  fileId: string;
+  name: string;
+  size: number;
+  mime: string;
+  previewDataUrl?: string;
+};
 
 export function createTextMessage(
   database: AppDatabase,
@@ -59,28 +75,10 @@ export function createTextMessage(
 export function createFileMessage(
   database: AppDatabase,
   sender: User,
-  senderSocketId: string,
-  input: {
-    roomId: string;
-    clientMessageId: string;
-    file: {
-      name: string;
-      size: number;
-      mime: string;
-      previewDataUrl?: string;
-    };
-  }
+  input: FileMessageInput
 ) {
   requireMembership(database, input.roomId, sender.id);
-  if (input.file.size <= 0 || input.file.size > limits.maxFileBytes) {
-    throw new AppError("FILE_TOO_LARGE", "File must be 500 MB or smaller");
-  }
-  if (
-    input.file.previewDataUrl &&
-    input.file.previewDataUrl.length > maxPreviewLength
-  ) {
-    throw new AppError("PREVIEW_TOO_LARGE", "Image preview is too large");
-  }
+  validateFileInput(input);
   const existing = getMessageByClientId(
     database,
     sender.id,
@@ -89,22 +87,29 @@ export function createFileMessage(
   if (existing) {
     return existing;
   }
+  const stored = database
+    .query<{ size: number }, [string]>(
+      "select size from server_files where id = ?"
+    )
+    .get(input.fileId);
+  if (!stored) {
+    return;
+  }
+  if (stored.size !== input.size) {
+    throw new AppError(
+      "FILE_HASH_CONFLICT",
+      "Stored file size does not match this file ID",
+      409
+    );
+  }
   const now = Date.now();
-  const offer: FileOffer = {
-    id: crypto.randomUUID(),
-    roomId: input.roomId,
-    senderUserId: sender.id,
-    senderSocketId,
-    name: input.file.name.slice(0, 255),
-    size: input.file.size,
-    mime: input.file.mime.slice(0, 120) || "application/octet-stream",
-    ...(input.file.previewDataUrl
-      ? { previewDataUrl: input.file.previewDataUrl }
-      : {}),
-    status: "available",
-    expiresAt: now + offerTtlMs,
-    createdAt: now,
-    updatedAt: now,
+  const attachment: FileAttachment = {
+    fileId: input.fileId,
+    name: input.name.slice(0, 255),
+    size: input.size,
+    mime: input.mime.slice(0, 120) || "application/octet-stream",
+    ...(input.previewDataUrl ? { previewDataUrl: input.previewDataUrl } : {}),
+    expiresAt: now + fileTtlMs,
   };
   const message: ChatMessage = {
     id: crypto.randomUUID(),
@@ -114,45 +119,31 @@ export function createFileMessage(
     senderUsername: sender.username,
     senderAvatarSeed: sender.avatarSeed,
     senderDeviceKind: sender.deviceKind,
-    fileOffer: offer,
+    fileAttachment: attachment,
     createdAt: now,
   };
   database.transaction(() => {
     database
       .query(
-        `insert into file_offers(
-          id, room_id, sender_user_id, sender_socket_id, name, size, mime,
-          preview_data_url, status, expires_at, created_at, updated_at
-        ) values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `insert into messages(
+          id, room_id, sender_user_id, client_message_id, kind, created_at
+        ) values(?, ?, ?, ?, 'file', ?)`
       )
-      .run(
-        offer.id,
-        offer.roomId,
-        offer.senderUserId,
-        offer.senderSocketId,
-        offer.name,
-        offer.size,
-        offer.mime,
-        offer.previewDataUrl ?? null,
-        offer.status,
-        offer.expiresAt,
-        now,
-        now
-      );
+      .run(message.id, input.roomId, sender.id, input.clientMessageId, now);
     database
       .query(
-        `insert into messages(
-          id, room_id, sender_user_id, client_message_id, kind,
-          file_offer_id, created_at
-        ) values(?, ?, ?, ?, 'file', ?, ?)`
+        `insert into message_files(
+          message_id, file_id, name, mime, size, preview_data_url, expires_at
+        ) values(?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         message.id,
-        message.roomId,
-        message.senderUserId,
-        input.clientMessageId,
-        offer.id,
-        now
+        attachment.fileId,
+        attachment.name,
+        attachment.mime,
+        attachment.size,
+        attachment.previewDataUrl ?? null,
+        attachment.expiresAt
       );
   })();
   return message;
@@ -166,28 +157,32 @@ export function listMessages(
 ): MessagePage {
   requireMembership(database, roomId, userId);
   const decoded = cursor ? decodeCursor(cursor) : undefined;
+  const now = Date.now();
   const rows = decoded
     ? database
-        .query<MessageRow, [string, number, number, string, number]>(
+        .query<MessageRow, [string, number, number, number, string, number]>(
           `${messageSelect}
            where m.room_id = ?
+           and (m.kind <> 'file' or mf.expires_at > ?)
            and (m.created_at < ? or (m.created_at = ? and m.id < ?))
            order by m.created_at desc, m.id desc limit ?`
         )
         .all(
           roomId,
+          now,
           decoded.createdAt,
           decoded.createdAt,
           decoded.id,
           messageLimit + 1
         )
     : database
-        .query<MessageRow, [string, number]>(
+        .query<MessageRow, [string, number, number]>(
           `${messageSelect}
            where m.room_id = ?
+           and (m.kind <> 'file' or mf.expires_at > ?)
            order by m.created_at desc, m.id desc limit ?`
         )
-        .all(roomId, messageLimit + 1);
+        .all(roomId, now, messageLimit + 1);
   const hasMore = rows.length > messageLimit;
   const pageRows = rows.slice(0, messageLimit);
   const last = pageRows.at(-1);
@@ -199,104 +194,44 @@ export function listMessages(
   };
 }
 
-export function getFileOffer(
+export function getFileDownload(
   database: AppDatabase,
-  offerId: string
-): FileOffer | undefined {
-  const row = database
-    .query<FileOfferRow, [string]>("select * from file_offers where id = ?")
-    .get(offerId);
-  return row ? mapOffer(row) : undefined;
-}
-
-export function lockTransfer(
-  database: AppDatabase,
-  offerId: string,
-  receiverUserId: string
+  messageId: string,
+  userId: string
 ) {
-  const offer = getFileOffer(database, offerId);
-  if (offer?.status !== "available" || offer.expiresAt <= Date.now()) {
-    throw new AppError("OFFER_UNAVAILABLE", "File is no longer available", 409);
+  return database
+    .query<
+      {
+        file_id: string;
+        room_id: string;
+        storage_path: string;
+        name: string;
+        mime: string;
+        size: number;
+      },
+      [string, string, number]
+    >(
+      `select sf.id as file_id, m.room_id, sf.storage_path,
+        mf.name, mf.mime, mf.size
+       from messages m
+       join message_files mf on mf.message_id = m.id
+       join server_files sf on sf.id = mf.file_id
+       join room_members rm on rm.room_id = m.room_id
+       where m.id = ? and rm.user_id = ? and mf.expires_at > ?`
+    )
+    .get(messageId, userId, Date.now());
+}
+
+function validateFileInput(input: FileMessageInput) {
+  if (!md5Pattern.test(input.fileId)) {
+    throw new AppError("INVALID_FILE_ID", "File ID must be an MD5 hash");
   }
-  requireMembership(database, offer.roomId, receiverUserId);
-  if (
-    hasActiveTransfer(database, offer.senderUserId) ||
-    hasActiveTransfer(database, receiverUserId)
-  ) {
-    throw new AppError("SENDER_BUSY", "Sender is busy", 409);
+  if (input.size <= 0 || input.size > limits.maxFileBytes) {
+    throw new AppError("FILE_TOO_LARGE", "File must be 200 MB or smaller");
   }
-  database
-    .query(
-      `update file_offers set
-        receiver_user_id = ?, status = 'transferring', updated_at = ?
-       where id = ?`
-    )
-    .run(receiverUserId, Date.now(), offerId);
-  return getFileOffer(database, offerId);
-}
-
-export function releaseTransfer(database: AppDatabase, offerId: string) {
-  const offer = getFileOffer(database, offerId);
-  if (!offer || offer.expiresAt <= Date.now()) {
-    return expireOffer(database, offerId);
+  if (input.previewDataUrl && input.previewDataUrl.length > maxPreviewLength) {
+    throw new AppError("PREVIEW_TOO_LARGE", "Image preview is too large");
   }
-  database
-    .query(
-      `update file_offers set
-        receiver_user_id = null, status = 'available', updated_at = ?
-       where id = ?`
-    )
-    .run(Date.now(), offerId);
-  return getFileOffer(database, offerId);
-}
-
-export function expireOffersForSocket(database: AppDatabase, socketId: string) {
-  const rows = database
-    .query<FileOfferRow, [string]>(
-      `select * from file_offers
-       where sender_socket_id = ? and status in ('available', 'transferring')`
-    )
-    .all(socketId);
-  database
-    .query(
-      `update file_offers set status = 'sender_offline', updated_at = ?
-       where sender_socket_id = ? and status in ('available', 'transferring')`
-    )
-    .run(Date.now(), socketId);
-  return rows.map((row) => ({
-    ...mapOffer(row),
-    status: "sender_offline" as const,
-    updatedAt: Date.now(),
-  }));
-}
-
-export function cleanupOffers(database: AppDatabase) {
-  database
-    .query(
-      `update file_offers set status = 'expired', updated_at = ?
-       where expires_at < ? and status in ('available', 'transferring')`
-    )
-    .run(Date.now(), Date.now());
-}
-
-function expireOffer(database: AppDatabase, offerId: string) {
-  database
-    .query(
-      "update file_offers set status = 'expired', updated_at = ? where id = ?"
-    )
-    .run(Date.now(), offerId);
-  return getFileOffer(database, offerId);
-}
-
-function hasActiveTransfer(database: AppDatabase, userId: string) {
-  return Boolean(
-    database
-      .query<{ id: string }, [string, string]>(
-        `select id from file_offers where status = 'transferring'
-         and (sender_user_id = ? or receiver_user_id = ?) limit 1`
-      )
-      .get(userId, userId)
-  );
 }
 
 function requireMembership(
@@ -354,14 +289,11 @@ const messageSelect = `
     m.created_at as message_created_at,
     u.id as sender_user_id, u.username as sender_username,
     u.avatar_seed as sender_avatar_seed, u.device_kind as sender_device_kind,
-    f.id as offer_id, f.sender_socket_id, f.receiver_user_id,
-    f.name as offer_name, f.size as offer_size, f.mime as offer_mime,
-    f.preview_data_url, f.status as offer_status,
-    f.expires_at, f.created_at as offer_created_at,
-    f.updated_at as offer_updated_at
+    mf.file_id, mf.name as file_name, mf.size as file_size,
+    mf.mime as file_mime, mf.preview_data_url, mf.expires_at
   from messages m
   join users u on u.id = m.sender_user_id
-  left join file_offers f on f.id = m.file_offer_id
+  left join message_files mf on mf.message_id = m.id
 `;
 
 type MessageRow = {
@@ -374,64 +306,30 @@ type MessageRow = {
   sender_username: string;
   sender_avatar_seed: string;
   sender_device_kind: User["deviceKind"];
-  offer_id: string | null;
-  sender_socket_id: string | null;
-  receiver_user_id: string | null;
-  offer_name: string | null;
-  offer_size: number | null;
-  offer_mime: string | null;
+  file_id: string | null;
+  file_name: string | null;
+  file_size: number | null;
+  file_mime: string | null;
   preview_data_url: string | null;
-  offer_status: FileOffer["status"] | null;
   expires_at: number | null;
-  offer_created_at: number | null;
-  offer_updated_at: number | null;
-};
-
-type FileOfferRow = {
-  id: string;
-  room_id: string;
-  sender_user_id: string;
-  sender_socket_id: string;
-  receiver_user_id: string | null;
-  name: string;
-  size: number;
-  mime: string;
-  preview_data_url: string | null;
-  status: FileOffer["status"];
-  expires_at: number;
-  created_at: number;
-  updated_at: number;
 };
 
 function mapMessage(row: MessageRow): ChatMessage {
-  const offer =
-    row.offer_id &&
-    row.sender_socket_id &&
-    row.offer_name &&
-    row.offer_size !== null &&
-    row.offer_mime &&
-    row.offer_status &&
-    row.expires_at !== null &&
-    row.offer_created_at !== null &&
-    row.offer_updated_at !== null
+  const attachment =
+    row.file_id &&
+    row.file_name &&
+    row.file_size !== null &&
+    row.file_mime &&
+    row.expires_at !== null
       ? {
-          id: row.offer_id,
-          roomId: row.room_id,
-          senderUserId: row.sender_user_id,
-          senderSocketId: row.sender_socket_id,
-          ...(row.receiver_user_id
-            ? { receiverUserId: row.receiver_user_id }
-            : {}),
-          name: row.offer_name,
-          size: row.offer_size,
-          mime: row.offer_mime,
+          fileId: row.file_id,
+          name: row.file_name,
+          size: row.file_size,
+          mime: row.file_mime,
           ...(row.preview_data_url
             ? { previewDataUrl: row.preview_data_url }
             : {}),
-          status: row.offer_status,
           expiresAt: row.expires_at,
-          createdAt: row.offer_created_at,
-          updatedAt: row.offer_updated_at,
         }
       : undefined;
   return {
@@ -443,25 +341,7 @@ function mapMessage(row: MessageRow): ChatMessage {
     senderAvatarSeed: row.sender_avatar_seed,
     senderDeviceKind: row.sender_device_kind,
     ...(row.body ? { body: row.body } : {}),
-    ...(offer ? { fileOffer: offer } : {}),
+    ...(attachment ? { fileAttachment: attachment } : {}),
     createdAt: row.message_created_at,
-  };
-}
-
-function mapOffer(row: FileOfferRow): FileOffer {
-  return {
-    id: row.id,
-    roomId: row.room_id,
-    senderUserId: row.sender_user_id,
-    senderSocketId: row.sender_socket_id,
-    ...(row.receiver_user_id ? { receiverUserId: row.receiver_user_id } : {}),
-    name: row.name,
-    size: row.size,
-    mime: row.mime,
-    ...(row.preview_data_url ? { previewDataUrl: row.preview_data_url } : {}),
-    status: row.status,
-    expiresAt: row.expires_at,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
   };
 }

@@ -12,7 +12,6 @@ export function openDatabase(
   database.exec("pragma journal_mode = WAL");
   database.exec("pragma foreign_keys = ON");
   migrate(database);
-  expireUnrecoverableOffers(database);
   return database;
 }
 
@@ -145,6 +144,18 @@ function migrate(database: Database) {
       .query("insert into schema_migrations(version, applied_at) values(3, ?)")
       .run(Date.now());
   }
+  if (current < 4) {
+    pruneOrphanedData(database);
+    database
+      .query("insert into schema_migrations(version, applied_at) values(4, ?)")
+      .run(Date.now());
+  }
+  if (current < 5) {
+    migrateFileCache(database);
+    database
+      .query("insert into schema_migrations(version, applied_at) values(5, ?)")
+      .run(Date.now());
+  }
 }
 
 function migrateIdentityToV2(database: Database) {
@@ -203,14 +214,75 @@ function pruneLegacyIdentityData(database: Database) {
   })();
 }
 
-function expireUnrecoverableOffers(database: Database) {
-  database
-    .query(
-      `update file_offers
-       set status = 'sender_offline', updated_at = ?
-       where status in ('available', 'transferring')`
-    )
-    .run(Date.now());
+function pruneOrphanedData(database: Database) {
+  database.transaction(() => {
+    database.exec(`
+      delete from room_members
+      where room_id not in (select id from rooms)
+      or user_id not in (select id from users);
+
+      delete from credentials
+      where user_id not in (select id from users);
+
+      update audit_logs
+      set actor_user_id = null
+      where actor_user_id not in (select id from users);
+    `);
+  })();
+}
+
+function migrateFileCache(database: Database) {
+  database.transaction(() => {
+    database.exec(`
+      delete from messages where kind = 'file';
+
+      create table messages_v5 (
+        id text primary key,
+        room_id text not null references rooms(id) on delete cascade,
+        sender_user_id text not null references users(id),
+        client_message_id text not null,
+        kind text not null,
+        body text,
+        created_at integer not null,
+        unique(sender_user_id, client_message_id)
+      );
+
+      insert into messages_v5(
+        id, room_id, sender_user_id, client_message_id, kind, body, created_at
+      )
+      select id, room_id, sender_user_id, client_message_id, kind, body, created_at
+      from messages;
+
+      drop table messages;
+      alter table messages_v5 rename to messages;
+      drop table file_offers;
+
+      create table server_files (
+        id text primary key,
+        sha256 text not null,
+        size integer not null,
+        storage_path text not null unique,
+        created_at integer not null
+      );
+
+      create table message_files (
+        message_id text primary key references messages(id) on delete cascade,
+        file_id text not null references server_files(id),
+        name text not null,
+        mime text not null,
+        size integer not null,
+        preview_data_url text,
+        expires_at integer not null
+      );
+
+      create index messages_room_cursor_idx
+        on messages(room_id, created_at desc, id desc);
+      create index message_files_expiry_idx
+        on message_files(expires_at);
+      create index message_files_file_idx
+        on message_files(file_id);
+    `);
+  })();
 }
 
 export function checkpointAndClose(database: Database) {

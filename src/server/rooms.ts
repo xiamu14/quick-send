@@ -12,7 +12,7 @@ export const limits = {
   maxOwnedRooms: 5,
   maxRoomMembers: 10,
   maxPendingRequests: 5,
-  maxFileBytes: 500 * 1024 * 1024,
+  maxFileBytes: 200 * 1024 * 1024,
 } as const;
 
 const requestTtlMs = 7 * 24 * 60 * 60 * 1000;
@@ -151,34 +151,38 @@ export function listRoomSummaries(
          where room_id = r.id
          order by created_at desc, id desc limit 1
        )
-       left join file_offers f on f.id = m.file_offer_id
+       left join message_files f on f.message_id = m.id
        where rm.user_id = ?
        order by coalesce(m.created_at, r.created_at) desc, r.id desc`
     )
     .all(userId);
-  return rows.map((row): RoomSummary => {
-    const memberIds = database
-      .query<{ user_id: string }, [string]>(
-        "select user_id from room_members where room_id = ?"
-      )
-      .all(row.id);
-    const lastMessage = lastMessageSummary(row);
-    return {
-      id: row.id,
-      name: row.name,
-      creatorId: row.creator_id,
-      creatorUsername: row.creator_username,
-      isOwner: row.creator_id === userId,
-      onlineCount: memberIds.filter((member) =>
-        onlineUserIds.has(member.user_id)
-      ).length,
-      memberCount: row.member_count,
-      pendingCount: row.creator_id === userId ? row.pending_count : 0,
-      ...(lastMessage ? { lastMessage } : {}),
-      lastActivityAt: row.last_created_at ?? row.created_at,
-      createdAt: row.created_at,
-    };
-  });
+  return rows
+    .filter(
+      (row) => row.creator_id === userId || onlineUserIds.has(row.creator_id)
+    )
+    .map((row): RoomSummary => {
+      const memberIds = database
+        .query<{ user_id: string }, [string]>(
+          "select user_id from room_members where room_id = ?"
+        )
+        .all(row.id);
+      const lastMessage = lastMessageSummary(row);
+      return {
+        id: row.id,
+        name: row.name,
+        creatorId: row.creator_id,
+        creatorUsername: row.creator_username,
+        isOwner: row.creator_id === userId,
+        onlineCount: memberIds.filter((member) =>
+          onlineUserIds.has(member.user_id)
+        ).length,
+        memberCount: row.member_count,
+        pendingCount: row.creator_id === userId ? row.pending_count : 0,
+        ...(lastMessage ? { lastMessage } : {}),
+        lastActivityAt: row.last_created_at ?? row.created_at,
+        createdAt: row.created_at,
+      };
+    });
 }
 
 export function listDiscoverRooms(
@@ -214,6 +218,7 @@ export function listDiscoverRooms(
        order by r.created_at desc`
     )
     .all(userId, userId, limits.maxRoomMembers)
+    .filter((row) => onlineUserIds.has(row.creator_id))
     .sort(
       (left, right) =>
         Number(onlineUserIds.has(right.creator_id)) -
@@ -252,7 +257,10 @@ export function getRoomDetail(
        where r.id = ?`
     )
     .get(roomId);
-  if (!room) {
+  if (
+    !room ||
+    (room.creator_id !== userId && !onlineUserIds.has(room.creator_id))
+  ) {
     return;
   }
   const isMember = hasRoomMembership(database, roomId, userId);
@@ -514,7 +522,8 @@ export function listPendingRequests(
 
 export function listRelevantPendingRequests(
   database: AppDatabase,
-  userId: string
+  userId: string,
+  onlineUserIds: ReadonlySet<string>
 ) {
   const ownedRoomIds = new Set(
     database
@@ -526,7 +535,9 @@ export function listRelevantPendingRequests(
   );
   return listPendingRequests(database).filter(
     (request) =>
-      request.requesterId === userId || ownedRoomIds.has(request.roomId)
+      ownedRoomIds.has(request.roomId) ||
+      (request.requesterId === userId &&
+        isRoomVisibleToUser(database, request.roomId, userId, onlineUserIds))
   );
 }
 
@@ -541,6 +552,22 @@ export function hasRoomMembership(
         "select room_id from room_members where room_id = ? and user_id = ?"
       )
       .get(roomId, userId)
+  );
+}
+
+export function isRoomVisibleToUser(
+  database: AppDatabase,
+  roomId: string,
+  userId: string,
+  onlineUserIds: ReadonlySet<string>
+) {
+  const room = database
+    .query<{ creator_id: string }, [string]>(
+      "select creator_id from rooms where id = ?"
+    )
+    .get(roomId);
+  return Boolean(
+    room && (room.creator_id === userId || onlineUserIds.has(room.creator_id))
   );
 }
 

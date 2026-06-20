@@ -2,7 +2,6 @@ import { atom, createStore } from "jotai";
 import type {
   BootstrapPayload,
   ChatMessage,
-  FileOffer,
   RoomDetail,
   RoomSummary,
 } from "@/shared/types";
@@ -15,7 +14,7 @@ export const socketConnectedAtom = atom(false);
 export const currentRoomAtom = atom<RoomDetail | null>(null);
 export const messagesAtom = atom<Record<string, ChatMessage[]>>({});
 export const messageCursorsAtom = atom<Record<string, string | undefined>>({});
-export const transferProgressAtom = atom<Record<string, number>>({});
+export const fileProgressAtom = atom<Record<string, number>>({});
 export const selectedRoomIdAtom = atom<string | null>(null);
 
 export function upsertRoomSummary(summary: RoomSummary) {
@@ -64,13 +63,11 @@ export function addMessage(message: ChatMessage) {
   });
 }
 
-export function updateOffer(offer: FileOffer) {
+export function removeMessage(roomId: string, messageId: string) {
   appStore.set(messagesAtom, (current) => ({
     ...current,
-    [offer.roomId]: (current[offer.roomId] ?? []).map((message) =>
-      message.fileOffer?.id === offer.id
-        ? { ...message, fileOffer: offer }
-        : message
+    [roomId]: (current[roomId] ?? []).filter(
+      (message) => message.id !== messageId
     ),
   }));
 }

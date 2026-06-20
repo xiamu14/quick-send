@@ -1,44 +1,23 @@
-import { afterEach, expect, test } from "bun:test";
-import { prepareReceivedFile } from "./save-file";
+import { expect, test } from "bun:test";
+import { reserveReceivedFilePreview } from "./save-file";
 
-const navigatorDescriptor = Object.getOwnPropertyDescriptor(
-  globalThis,
-  "navigator"
-);
-
-afterEach(() => {
-  if (navigatorDescriptor) {
-    Object.defineProperty(globalThis, "navigator", navigatorDescriptor);
-  } else {
-    Reflect.deleteProperty(globalThis, "navigator");
-  }
+test("reports a blocked file preview window", () => {
+  expect(reserveReceivedFilePreview(() => null)).toBeUndefined();
 });
 
-test("mobile images wait for an explicit save action", () => {
-  setNavigator({
-    maxTouchPoints: 1,
-  });
-  const file = new File(["image"], "photo.jpg", { type: "image/jpeg" });
+test("reserves the preview window synchronously", () => {
+  let closed = false;
+  const opened = {
+    close: () => {
+      closed = true;
+    },
+    location: { href: "" },
+    opener: undefined,
+  } as unknown as Window;
 
-  expect(prepareReceivedFile(file)).toEqual({
-    file,
-    needsUserSave: true,
-  });
+  const preview = reserveReceivedFilePreview(() => opened);
+  preview?.close();
+
+  expect(closed).toBe(true);
+  expect(opened.opener).toBeNull();
 });
-
-test("mobile images do not depend on Web Share support", () => {
-  setNavigator({
-    maxTouchPoints: 1,
-  });
-  const file = new File(["image"], "photo.jpg", { type: "image/jpeg" });
-  const result = prepareReceivedFile(file);
-
-  expect(result.needsUserSave).toBe(true);
-});
-
-function setNavigator(value: Partial<Navigator>) {
-  Object.defineProperty(globalThis, "navigator", {
-    configurable: true,
-    value,
-  });
-}

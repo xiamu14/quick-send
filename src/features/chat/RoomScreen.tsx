@@ -29,14 +29,13 @@ import {
   RoomSidebar,
   useAuthenticatedBootstrap,
 } from "@/features/rooms/RoomList";
-import { FileTransferManager } from "@/features/transfers/FileTransferManager";
+import { useFileCache } from "@/features/transfers/use-file-cache";
 import { api, post, remove } from "@/lib/api";
 import {
   getSocket,
   refreshBootstrap,
   setRoomDeletedHandler,
   setRoomSummaryHandler,
-  setTransferHandlers,
 } from "@/lib/socket";
 import { toast } from "@/lib/toast";
 import type {
@@ -52,10 +51,8 @@ import {
   messageCursorsAtom,
   messagesAtom,
   socketConnectedAtom,
-  transferProgressAtom,
 } from "@/store/app";
-import { createImagePreview } from "@/web/preview";
-import { openReceivedFile, saveReceivedFile } from "@/web/save-file";
+import { createRandomId } from "@/web/random-id";
 import { useMobile } from "@/web/use-mobile";
 
 const mobileUserAgentPattern = /Mobi|Android/i;
@@ -66,17 +63,18 @@ export function RoomPage({ roomId }: { roomId: string }) {
   const connected = useAtomValue(socketConnectedAtom);
   const messagesByRoom = useAtomValue(messagesAtom);
   const cursors = useAtomValue(messageCursorsAtom);
-  const progress = useAtomValue(transferProgressAtom);
   const [room, setRoom] = useState<RoomDetail>();
   const [loadedRoomId, setLoadedRoomId] = useState<string>();
   const [loadingRoom, setLoadingRoom] = useState(true);
   const [loadingEarlier, setLoadingEarlier] = useState(false);
-  const [receivedFiles, setReceivedFiles] = useState<Record<string, File>>({});
   const fileInput = useRef<HTMLInputElement>(null);
   const imageInput = useRef<HTMLInputElement>(null);
-  const transfer = useRef<FileTransferManager | undefined>(undefined);
   const messages = messagesByRoom[roomId] ?? [];
   const currentUserId = bootstrap?.user.id;
+  const fileCache = useFileCache(
+    roomId,
+    bootstrap?.limits.maxFileBytes ?? 200 * 1024 * 1024
+  );
 
   const loadRoomDetail = useCallback(async () => {
     const detail = await api<RoomDetail | { missing: true }>(
@@ -122,33 +120,7 @@ export function RoomPage({ roomId }: { roomId: string }) {
   useEffect(() => {
     if (currentUserId) {
       void loadRoom();
-      const socket = getSocket();
-      transfer.current = new FileTransferManager(
-        currentUserId,
-        socket,
-        (offerId, value) => {
-          appStore.set(transferProgressAtom, (current) => ({
-            ...current,
-            [offerId]: value,
-          }));
-        },
-        () => toast.error("Direct connection failed"),
-        (offerId, result) => {
-          if (!result.needsUserSave) {
-            toast.success(`Saved ${result.file.name} to Downloads`);
-            return;
-          }
-          setReceivedFiles((current) => ({
-            ...current,
-            [offerId]: result.file,
-          }));
-          toast.success("Image received. Tap Save to store it.");
-        }
-      );
-      setTransferHandlers(
-        (payload) => void transfer.current?.handleLocked(payload),
-        (type, payload) => void transfer.current?.handleRtc(type, payload)
-      );
+      getSocket();
       setRoomDeletedHandler((deletedRoomId) => {
         if (deletedRoomId === roomId) {
           void navigate({ to: "/" });
@@ -161,7 +133,6 @@ export function RoomPage({ roomId }: { roomId: string }) {
       });
     }
     return () => {
-      setTransferHandlers(undefined, undefined);
       setRoomDeletedHandler(undefined);
       setRoomSummaryHandler(undefined);
     };
@@ -223,44 +194,6 @@ export function RoomPage({ roomId }: { roomId: string }) {
     }
   }
 
-  async function chooseFile(file: File | undefined) {
-    if (!file) {
-      return;
-    }
-    if (file.size > (bootstrap?.limits.maxFileBytes ?? 500 * 1024 * 1024)) {
-      toast.error("File must be 500 MB or smaller");
-      return;
-    }
-    const socket = getSocket();
-    const clientMessageId = crypto.randomUUID();
-    transfer.current?.remember(clientMessageId, file);
-    const previewDataUrl = file.type.startsWith("image/")
-      ? await createImagePreview(file).catch(() => undefined)
-      : undefined;
-    socket.timeout(5000).emit(
-      "file:create",
-      {
-        roomId,
-        clientMessageId,
-        file: {
-          name: file.name,
-          size: file.size,
-          mime: file.type || "application/octet-stream",
-          ...(previewDataUrl ? { previewDataUrl } : {}),
-        },
-      },
-      (error, result) => {
-        if (error || !result.ok || !result.data?.fileOffer) {
-          toast.error(
-            result?.ok === false ? result.error.message : "File wasn't sent"
-          );
-          return;
-        }
-        transfer.current?.bindOffer(clientMessageId, result.data.fileOffer.id);
-      }
-    );
-  }
-
   return (
     <main className="flex h-dvh overflow-hidden bg-white">
       <RoomSidebar />
@@ -273,45 +206,17 @@ export function RoomPage({ roomId }: { roomId: string }) {
               currentUserId={bootstrap.user.id}
               loadingEarlier={loadingEarlier}
               messages={messages}
+              onDownload={(message) => void fileCache.download(message)}
               onLoadEarlier={loadEarlier}
-              onOpen={(offerId) => {
-                const file = receivedFiles[offerId];
-                if (file) {
-                  openReceivedFile(file);
-                }
-              }}
-              onReceive={(offerId) => {
-                getSocket().emit(
-                  "transfer:receive",
-                  { roomId, offerId },
-                  (result) => {
-                    if (!result.ok) {
-                      toast.error(result.error.message);
-                    }
-                  }
-                );
-              }}
-              onSave={(offerId) => {
-                const file = receivedFiles[offerId];
-                if (!file) {
-                  return;
-                }
-                void saveReceivedFile(file).then((result) => {
-                  if (result === "saved") {
-                    toast.success(`Saved ${file.name}`);
-                  } else if (result === "unsupported") {
-                    toast("Use Open, then long press the image to save it");
-                  }
-                });
-              }}
-              progress={progress}
-              receivedFiles={receivedFiles}
+              onOpen={(message) => void fileCache.open(message)}
+              progress={fileCache.progress}
             />
             <Composer
               connected={connected}
               onFile={() => fileInput.current?.click()}
               onImage={() => imageInput.current?.click()}
               roomId={roomId}
+              uploading={fileCache.uploading}
             />
           </>
         ) : (
@@ -340,14 +245,22 @@ export function RoomPage({ roomId }: { roomId: string }) {
       </section>
       <input
         hidden
-        onChange={(event) => void chooseFile(event.target.files?.[0])}
+        onChange={(event) => {
+          const file = event.currentTarget.files?.[0];
+          event.currentTarget.value = "";
+          void fileCache.upload(file);
+        }}
         ref={fileInput}
         type="file"
       />
       <input
         accept="image/*"
         hidden
-        onChange={(event) => void chooseFile(event.target.files?.[0])}
+        onChange={(event) => {
+          const file = event.currentTarget.files?.[0];
+          event.currentTarget.value = "";
+          void fileCache.upload(file);
+        }}
         ref={imageInput}
         type="file"
       />
@@ -481,21 +394,17 @@ function MessageTimeline({
   canLoadEarlier,
   loadingEarlier,
   onLoadEarlier,
+  onDownload,
   onOpen,
-  onReceive,
-  onSave,
-  receivedFiles,
 }: {
   messages: ChatMessage[];
   currentUserId: string;
   progress: Record<string, number>;
-  receivedFiles: Record<string, File>;
   canLoadEarlier: boolean;
   loadingEarlier: boolean;
   onLoadEarlier: () => void;
-  onOpen: (offerId: string) => void;
-  onReceive: (offerId: string) => void;
-  onSave: (offerId: string) => void;
+  onDownload: (message: ChatMessage) => void;
+  onOpen: (message: ChatMessage) => void;
 }) {
   const container = useRef<HTMLDivElement>(null);
   const list = useRef<VariableSizeList>(null);
@@ -522,10 +431,8 @@ function MessageTimeline({
       messages,
       currentUserId,
       progress,
-      receivedFiles,
+      onDownload,
       onOpen,
-      onReceive,
-      onSave,
       setHeight: (id: string, index: number, value: number) => {
         if (heights.current[id] !== value) {
           heights.current[id] = value;
@@ -533,15 +440,7 @@ function MessageTimeline({
         }
       },
     }),
-    [
-      currentUserId,
-      messages,
-      onOpen,
-      onReceive,
-      onSave,
-      progress,
-      receivedFiles,
-    ]
+    [currentUserId, messages, onDownload, onOpen, progress]
   );
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-x-hidden px-3 sm:px-6">
@@ -589,10 +488,8 @@ function MessageRow({
     messages: ChatMessage[];
     currentUserId: string;
     progress: Record<string, number>;
-    receivedFiles: Record<string, File>;
-    onOpen: (offerId: string) => void;
-    onReceive: (offerId: string) => void;
-    onSave: (offerId: string) => void;
+    onDownload: (message: ChatMessage) => void;
+    onOpen: (message: ChatMessage) => void;
     setHeight: (id: string, index: number, value: number) => void;
   };
 }) {
@@ -641,16 +538,15 @@ function MessageRow({
         <CopyIcon className="ml-2 inline" size={13} />
       </motion.button>
     );
-  } else if (message.fileOffer) {
+  } else if (message.fileAttachment) {
     content = (
       <FileMessage
+        attachment={message.fileAttachment}
         isSelf={self}
-        offer={message.fileOffer}
+        message={message}
+        onDownload={data.onDownload}
         onOpen={data.onOpen}
-        onReceive={data.onReceive}
-        onSave={data.onSave}
-        progress={data.progress[message.fileOffer.id]}
-        receivedFile={data.receivedFiles[message.fileOffer.id]}
+        progress={data.progress[message.id]}
       />
     );
   }
@@ -698,63 +594,43 @@ function MessageRow({
 }
 
 function FileMessage({
-  offer,
+  attachment,
   isSelf,
+  message,
   progress,
-  receivedFile,
+  onDownload,
   onOpen,
-  onReceive,
-  onSave,
 }: {
-  offer: ChatMessage["fileOffer"] & {};
+  attachment: NonNullable<ChatMessage["fileAttachment"]>;
   isSelf: boolean;
+  message: ChatMessage;
   progress: number | undefined;
-  receivedFile: File | undefined;
-  onOpen: (offerId: string) => void;
-  onReceive: (offerId: string) => void;
-  onSave: (offerId: string) => void;
+  onDownload: (message: ChatMessage) => void;
+  onOpen: (message: ChatMessage) => void;
 }) {
-  const available =
-    offer.status === "available" && offer.expiresAt > Date.now();
-  let receiveLabel = "Expired";
-  if (available) {
-    receiveLabel = "Receive";
-  } else if (offer.status === "transferring") {
-    receiveLabel = "Transferring";
-  }
+  const available = attachment.expiresAt > Date.now();
   let receiveAction: React.ReactNode = null;
   if (!isSelf) {
-    if (receivedFile) {
-      receiveAction = (
-        <div className="mt-2 flex gap-2">
-          <Button onPress={() => onSave(offer.id)} size="sm" variant="primary">
-            Save
-          </Button>
-          <Button
-            onPress={() => onOpen(offer.id)}
-            size="sm"
-            variant="secondary"
-          >
-            Open
-          </Button>
-        </div>
-      );
-    } else if (available) {
+    if (available) {
       receiveAction = (
         <Button
           className="mt-2"
-          onPress={() => onReceive(offer.id)}
+          isDisabled={progress !== undefined}
+          isPending={progress !== undefined}
+          onPress={() => onDownload(message)}
           size="sm"
           variant="primary"
         >
-          {receiveLabel}
+          {progress === undefined
+            ? "Download"
+            : `${Math.round(progress * 100)}%`}
         </Button>
       );
     } else {
       receiveAction = (
         <Chip color="danger">
           <Ban width={12} />
-          <Chip.Label>{receiveLabel}</Chip.Label>
+          <Chip.Label>Expired</Chip.Label>
         </Chip>
       );
     }
@@ -762,43 +638,44 @@ function FileMessage({
   return (
     <Card className="w-full max-w-60 rounded-2xl border border-default-100 bg-white p-3 shadow-sm">
       <div className="flex gap-3">
-        {offer.previewDataUrl ? (
-          <img
-            alt=""
-            className="size-18 object-cover"
-            src={offer.previewDataUrl}
-            style={{ borderRadius: "calc(var(--radius) * 2 - 6px)" }}
-          />
-        ) : (
-          <div className="grid size-16 shrink-0 place-items-center rounded-2xl bg-accent-soft text-accent-soft-foreground">
-            <FileIcon />
-          </div>
-        )}
+        <button
+          aria-label={`Open ${attachment.name}`}
+          className="shrink-0 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={!available || progress !== undefined}
+          onClick={() => onOpen(message)}
+          type="button"
+        >
+          {attachment.previewDataUrl ? (
+            <img
+              alt=""
+              className="size-18 object-cover"
+              src={attachment.previewDataUrl}
+              style={{ borderRadius: "calc(var(--radius) * 2 - 6px)" }}
+            />
+          ) : (
+            <span className="grid size-16 place-items-center rounded-2xl bg-accent-soft text-accent-soft-foreground">
+              <FileIcon />
+            </span>
+          )}
+        </button>
         <div className="min-w-0 flex-1">
-          <p className="truncate font-medium">{offer.name}</p>
+          <p className="truncate font-medium">{attachment.name}</p>
           <p className="mt-1 text-default-500 text-xs">
-            {formatBytes(offer.size)}
+            {formatBytes(attachment.size)}
           </p>
-          {isSelf && offer.status === "sender_offline" ? (
-            <Chip className="mt-2" size="sm" variant="primary">
-              <Chip.Label>Offline</Chip.Label>
-            </Chip>
-          ) : null}
-          {isSelf && offer.status !== "sender_offline" ? (
-            <p className="mt-2 text-default-500 text-xs">
-              {offer.status === "available" ? "Ready" : offer.status}
-            </p>
+          {isSelf ? (
+            <p className="mt-2 text-default-500 text-xs">Stored for 3 days</p>
           ) : null}
           {receiveAction}
         </div>
       </div>
-      {offer.status === "transferring" ? (
+      {progress === undefined ? null : (
         <ProgressBar
           aria-label="Transfer progress"
           className="mt-3"
           value={Math.round((progress ?? 0) * 100)}
         />
-      ) : null}
+      )}
     </Card>
   );
 }
@@ -808,11 +685,13 @@ function Composer({
   connected,
   onFile,
   onImage,
+  uploading,
 }: {
   roomId: string;
   connected: boolean;
   onFile: () => void;
   onImage: () => void;
+  uploading: boolean;
 }) {
   const [value, setValue] = useState("");
   const [sending, setSending] = useState(false);
@@ -825,7 +704,7 @@ function Composer({
     setSending(true);
     try {
       const message = await post<ChatMessage>(`/api/rooms/${roomId}/messages`, {
-        clientMessageId: crypto.randomUUID(),
+        clientMessageId: createRandomId(),
         body,
       });
       addMessage(message);
@@ -848,8 +727,9 @@ function Composer({
       <div className="mx-auto flex max-w-4xl items-center gap-2">
         <Button
           aria-label="Choose image"
-          isDisabled={!connected}
+          isDisabled={!connected || uploading}
           isIconOnly
+          isPending={uploading}
           onPress={onImage}
           variant="secondary"
         >
@@ -857,7 +737,7 @@ function Composer({
         </Button>
         <Button
           aria-label="Choose file"
-          isDisabled={!connected}
+          isDisabled={!connected || uploading}
           isIconOnly
           onPress={onFile}
           variant="secondary"
@@ -892,7 +772,6 @@ function Composer({
             isPending={sending}
             onPress={send}
             variant="primary"
-            // className={"rounded-2xl"}
           >
             <SendIcon />
           </Button>

@@ -1,6 +1,7 @@
-import { existsSync } from "node:fs";
+import { createReadStream, existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { Readable } from "node:stream";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { type } from "arktype";
@@ -11,19 +12,32 @@ import type { User } from "@/shared/types";
 import { checkpointAndClose, openDatabase } from "./db";
 import { AppError, errorPayload } from "./errors";
 import {
+  absoluteStoragePath,
+  cleanupExpiredFileCache,
+  isStoredFileAvailable,
+  storeUploadedFile,
+} from "./files";
+import {
   cleanupIdentityState,
   deviceKindFromUserAgent,
   ensureIdentity,
   type IdentityResult,
   resolveCredential,
 } from "./identity";
-import { cleanupOffers, createTextMessage, listMessages } from "./messages";
+import {
+  createFileMessage,
+  createTextMessage,
+  getFileDownload,
+  listMessages,
+} from "./messages";
 import { acquireProcessLock } from "./process-lock";
 import {
   cleanupRoomState,
   createRoom,
   deleteRoom,
   getRoomDetail,
+  hasRoomMembership,
+  isRoomVisibleToUser,
   limits,
   listDiscoverRooms,
   listRelevantPendingRequests,
@@ -50,7 +64,7 @@ app.use(
   secureHeaders({
     contentSecurityPolicy: {
       defaultSrc: ["'self'"],
-      connectSrc: ["'self'", "wss:"],
+      connectSrc: ["'self'", "ws:", "wss:"],
       imgSrc: ["'self'", "data:", "blob:"],
       scriptSrc: ["'self'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
@@ -81,6 +95,14 @@ const deleteRoomSchema = type({ confirmation: "string" });
 const textMessageSchema = type({
   clientMessageId: "string",
   body: "string",
+});
+const filePrepareSchema = type({
+  clientMessageId: "string",
+  fileId: "string",
+  name: "string",
+  size: "number",
+  mime: "string",
+  "previewDataUrl?": "string",
 });
 
 app.post("/api/identity/ensure", async (context) =>
@@ -124,7 +146,11 @@ app.get("/api/bootstrap", (context) =>
     return {
       user,
       rooms: listRoomSummaries(database, user.id, realtime.onlineUserIds()),
-      pendingRequests: listRelevantPendingRequests(database, user.id),
+      pendingRequests: listRelevantPendingRequests(
+        database,
+        user.id,
+        realtime.onlineUserIds()
+      ),
       limits,
     };
   })
@@ -175,6 +201,7 @@ app.post("/api/rooms/:roomId/requests", (context) =>
   route(context, () => {
     const user = context.get("user");
     const roomId = context.req.param("roomId");
+    requireVisibleRoom(roomId, user.id);
     const requestId = requestToJoin(database, roomId, user);
     realtime.notifyJoinRequest(roomId, user.id);
     return { requestId };
@@ -209,20 +236,19 @@ app.post("/api/requests/:requestId/reject", (context) =>
 );
 
 app.get("/api/rooms/:roomId/messages", (context) =>
-  route(context, () =>
-    listMessages(
-      database,
-      context.req.param("roomId"),
-      context.get("user").id,
-      context.req.query("cursor")
-    )
-  )
+  route(context, () => {
+    const roomId = context.req.param("roomId");
+    const userId = context.get("user").id;
+    requireVisibleRoom(roomId, userId);
+    return listMessages(database, roomId, userId, context.req.query("cursor"));
+  })
 );
 
 app.post("/api/rooms/:roomId/messages", async (context) =>
   route(context, async () => {
     const input = await parseJson(context.req.raw, textMessageSchema);
     const roomId = context.req.param("roomId");
+    requireVisibleRoom(roomId, context.get("user").id);
     const message = createTextMessage(database, context.get("user"), {
       roomId,
       clientMessageId: input.clientMessageId,
@@ -232,6 +258,76 @@ app.post("/api/rooms/:roomId/messages", async (context) =>
     return message;
   })
 );
+
+app.post("/api/rooms/:roomId/files/prepare", async (context) =>
+  route(context, async () => {
+    const input = await parseJson(context.req.raw, filePrepareSchema);
+    const roomId = context.req.param("roomId");
+    requireVisibleRoom(roomId, context.get("user").id);
+    if (!hasRoomMembership(database, roomId, context.get("user").id)) {
+      throw new AppError("FORBIDDEN", "Room membership is required", 403);
+    }
+    const available = isStoredFileAvailable(database, input.fileId, input.size);
+    if (!available) {
+      return { uploadRequired: true as const };
+    }
+    const message = createFileMessage(database, context.get("user"), {
+      roomId,
+      ...input,
+    });
+    if (!message) {
+      return { uploadRequired: true as const };
+    }
+    realtime.publishMessage(roomId, message);
+    return { uploadRequired: false as const, message };
+  })
+);
+
+app.put("/api/rooms/:roomId/files/:fileId", (context) =>
+  route(context, () => {
+    const expectedSize = Number(context.req.query("size"));
+    requireVisibleRoom(context.req.param("roomId"), context.get("user").id);
+    return storeUploadedFile(database, context.req.raw, {
+      roomId: context.req.param("roomId"),
+      userId: context.get("user").id,
+      fileId: context.req.param("fileId"),
+      expectedSize,
+    });
+  })
+);
+
+app.get("/api/messages/:messageId/file", (context) => {
+  try {
+    const file = getFileDownload(
+      database,
+      context.req.param("messageId"),
+      context.get("user").id
+    );
+    if (!file) {
+      throw new AppError("FILE_NOT_FOUND", "File is unavailable", 404);
+    }
+    requireVisibleRoom(file.room_id, context.get("user").id);
+    const path = absoluteStoragePath(file.storage_path);
+    if (!existsSync(path)) {
+      throw new AppError("FILE_NOT_FOUND", "File is unavailable", 410);
+    }
+    return new Response(
+      Readable.toWeb(createReadStream(path)) as unknown as BodyInit,
+      {
+        headers: {
+          "cache-control": "no-store",
+          "content-disposition": contentDisposition(file.name),
+          "content-length": String(file.size),
+          "content-type": file.mime,
+          etag: `"${file.file_id}"`,
+        },
+      }
+    );
+  } catch (error) {
+    const result = errorPayload(error);
+    return context.json(result.body, result.status as 400);
+  }
+});
 
 app.use("/assets/*", serveStatic({ root: clientRoot }));
 app.get("/favicon.svg", serveStatic({ path: join(clientRoot, "favicon.svg") }));
@@ -255,11 +351,34 @@ const realtime = createRealtimeHub(
   database
 );
 
+let cleanupRunning = false;
+async function runCleanup() {
+  if (cleanupRunning) {
+    return;
+  }
+  cleanupRunning = true;
+  try {
+    realtime.deleteMessages(await cleanupExpiredFileCache(database));
+  } finally {
+    cleanupRunning = false;
+  }
+}
+void runCleanup().catch(logCleanupError);
 const cleanupTimer = setInterval(() => {
   cleanupIdentityState(database);
   cleanupRoomState(database);
-  cleanupOffers(database);
+  void runCleanup().catch(logCleanupError);
 }, 60_000);
+
+function logCleanupError(error: unknown) {
+  console.error(
+    JSON.stringify({
+      level: "error",
+      event: "file_cache_cleanup_failed",
+      message: error instanceof Error ? error.message : "Unknown error",
+    })
+  );
+}
 
 let shuttingDown = false;
 async function shutdown() {
@@ -321,6 +440,14 @@ function bearerToken(value: string | undefined) {
   return value?.match(bearerPattern)?.[1];
 }
 
+function requireVisibleRoom(roomId: string, userId: string) {
+  if (
+    !isRoomVisibleToUser(database, roomId, userId, realtime.onlineUserIds())
+  ) {
+    throw new AppError("ROOM_NOT_FOUND", "Room is not available", 404);
+  }
+}
+
 function hasMatchingOrigin(request: Request) {
   const origin = request.headers.get("origin");
   if (!origin) {
@@ -336,4 +463,8 @@ function hasMatchingOrigin(request: Request) {
   } catch {
     return false;
   }
+}
+
+function contentDisposition(name: string) {
+  return `attachment; filename*=UTF-8''${encodeURIComponent(name)}`;
 }

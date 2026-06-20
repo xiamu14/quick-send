@@ -6,28 +6,16 @@ import type {
   ServerToClientEvents,
   SocketAck,
 } from "@/shared/protocol";
-import {
-  fileCreateSchema,
-  messageCreateSchema,
-  rtcSchema,
-  transferReceiveSchema,
-  transferStatusSchema,
-} from "@/shared/protocol";
+import { messageCreateSchema } from "@/shared/protocol";
 import type { ChatMessage, User } from "@/shared/types";
 import type { AppDatabase } from "./db";
 import { AppError } from "./errors";
 import { resolveCredential } from "./identity";
-import {
-  createFileMessage,
-  createTextMessage,
-  expireOffersForSocket,
-  getFileOffer,
-  lockTransfer,
-  releaseTransfer,
-} from "./messages";
-import { hasRoomMembership, listRoomSummaries } from "./rooms";
+import { createTextMessage } from "./messages";
+import { isRoomVisibleToUser, listRoomSummaries } from "./rooms";
 
 type SocketData = { user: User };
+const creatorOfflineGraceMs = 30_000;
 
 export type RealtimeHub = ReturnType<typeof createRealtimeHub>;
 
@@ -46,6 +34,7 @@ export function createRealtimeHub(
     cors: { origin: true },
   });
   const userSockets = new Map<string, Set<string>>();
+  const offlineTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   io.use(async (socket, next) => {
     try {
@@ -71,125 +60,61 @@ export function createRealtimeHub(
 
   io.on("connection", (socket) => {
     const user = socket.data.user;
+    const wasOnline = userSockets.has(user.id);
+    const offlineTimer = offlineTimers.get(user.id);
+    if (offlineTimer) {
+      clearTimeout(offlineTimer);
+      offlineTimers.delete(user.id);
+    }
     const sockets = userSockets.get(user.id) ?? new Set<string>();
     sockets.add(socket.id);
     userSockets.set(user.id, sockets);
     socket.join(`user:${user.id}`);
     for (const row of database
-      .query<{ room_id: string }, [string]>(
-        "select room_id from room_members where user_id = ?"
+      .query<{ room_id: string; creator_id: string }, [string]>(
+        `select rm.room_id, r.creator_id
+         from room_members rm join rooms r on r.id = rm.room_id
+         where rm.user_id = ?`
       )
       .all(user.id)) {
-      socket.join(`room:${row.room_id}`);
-      emitRoomSummary(row.room_id);
+      if (row.creator_id === user.id || userSockets.has(row.creator_id)) {
+        socket.join(`room:${row.room_id}`);
+        emitRoomSummary(row.room_id);
+      }
+    }
+    if (!wasOnline) {
+      showOwnedRooms(user.id);
     }
 
     socket.on("message:create", (payload, ack) => {
       handleAck(ack, () => {
         const input = parsePayload(messageCreateSchema, payload);
+        if (
+          !isRoomVisibleToUser(database, input.roomId, user.id, onlineUserIds())
+        ) {
+          throw new AppError("ROOM_NOT_FOUND", "Room is not available", 404);
+        }
         const message = createTextMessage(database, user, input);
         publishMessage(input.roomId, message);
         return message;
       });
     });
 
-    socket.on("file:create", (payload, ack) => {
-      handleAck(ack, () => {
-        const input = parsePayload(fileCreateSchema, payload);
-        const message = createFileMessage(database, user, socket.id, input);
-        publishMessage(input.roomId, message);
-        return message;
-      });
-    });
-
-    socket.on("transfer:receive", (payload, ack) => {
-      handleAck(ack, () => {
-        const input = parsePayload(transferReceiveSchema, payload);
-        const offer = lockTransfer(database, input.offerId, user.id);
-        if (!offer || offer.roomId !== input.roomId) {
-          throw new AppError("OFFER_UNAVAILABLE", "File is unavailable", 409);
-        }
-        io.to(`room:${offer.roomId}`).emit("file-offer:updated", offer);
-        io.to(offer.senderSocketId)
-          .to(`user:${user.id}`)
-          .emit("transfer:locked", {
-            offer,
-            senderUserId: offer.senderUserId,
-            receiverUserId: user.id,
-          });
-        return offer;
-      });
-    });
-
-    socket.on("transfer:complete", (payload) => {
-      const input = parsePayload(transferStatusSchema, payload);
-      const offer = getFileOffer(database, input.offerId);
-      if (
-        offer?.roomId === input.roomId &&
-        (offer.senderUserId === user.id || offer.receiverUserId === user.id)
-      ) {
-        const next = releaseTransfer(database, offer.id);
-        if (next) {
-          io.to(`room:${offer.roomId}`).emit("file-offer:updated", next);
-        }
-      }
-    });
-
-    socket.on("transfer:fail", (payload) => {
-      const input = parsePayload(transferStatusSchema, payload);
-      const offer = getFileOffer(database, input.offerId);
-      if (
-        offer?.roomId === input.roomId &&
-        (offer.senderUserId === user.id || offer.receiverUserId === user.id)
-      ) {
-        const next = releaseTransfer(database, offer.id);
-        if (next) {
-          io.to(`room:${offer.roomId}`).emit("file-offer:updated", next);
-        }
-      }
-    });
-
-    for (const eventName of [
-      "rtc:offer",
-      "rtc:answer",
-      "rtc:candidate",
-    ] as const) {
-      socket.on(eventName, (payload) => {
-        const input = parsePayload(rtcSchema, payload);
-        if (
-          hasRoomMembership(database, input.roomId, user.id) &&
-          hasRoomMembership(database, input.roomId, input.toUserId)
-        ) {
-          io.to(`user:${input.toUserId}`).emit(eventName, {
-            roomId: input.roomId,
-            offerId: input.offerId,
-            fromUserId: user.id,
-            payload: input.payload,
-          });
-        }
-      });
-    }
-
     socket.on("disconnect", () => {
       const current = userSockets.get(user.id);
       current?.delete(socket.id);
       if (current?.size === 0) {
-        userSockets.delete(user.id);
-      }
-      for (const offer of expireOffersForSocket(database, socket.id)) {
-        io.to(`room:${offer.roomId}`).emit("file-offer:updated", offer);
-      }
-      setTimeout(() => {
-        if (!userSockets.has(user.id)) {
-          for (const row of database
-            .query<{ room_id: string }, [string]>(
-              "select room_id from room_members where user_id = ?"
-            )
-            .all(user.id)) {
-            emitRoomSummary(row.room_id);
+        const timer = setTimeout(() => {
+          const latest = userSockets.get(user.id);
+          if (latest?.size === 0) {
+            userSockets.delete(user.id);
+            offlineTimers.delete(user.id);
+            hideOwnedRooms(user.id);
+            updateJoinedRoomSummaries(user.id);
           }
-        }
-      }, 10_000);
+        }, creatorOfflineGraceMs);
+        offlineTimers.set(user.id, timer);
+      }
     });
   });
 
@@ -240,9 +165,63 @@ export function createRealtimeHub(
     io.in(`room:${roomId}`).socketsLeave(`room:${roomId}`);
   }
 
+  function hideOwnedRooms(creatorId: string) {
+    for (const room of database
+      .query<{ id: string }, [string]>(
+        "select id from rooms where creator_id = ?"
+      )
+      .all(creatorId)) {
+      io.emit("room:visibility", { roomId: room.id, visible: false });
+      io.in(`room:${room.id}`).socketsLeave(`room:${room.id}`);
+    }
+  }
+
+  function showOwnedRooms(creatorId: string) {
+    for (const room of database
+      .query<{ id: string }, [string]>(
+        "select id from rooms where creator_id = ?"
+      )
+      .all(creatorId)) {
+      io.emit("room:visibility", { roomId: room.id, visible: true });
+      for (const member of database
+        .query<{ user_id: string }, [string]>(
+          "select user_id from room_members where room_id = ?"
+        )
+        .all(room.id)) {
+        for (const socketId of userSockets.get(member.user_id) ?? []) {
+          io.sockets.sockets.get(socketId)?.join(`room:${room.id}`);
+        }
+      }
+      emitRoomSummary(room.id);
+    }
+  }
+
+  function updateJoinedRoomSummaries(userId: string) {
+    for (const room of database
+      .query<{ id: string; creator_id: string }, [string, string]>(
+        `select r.id, r.creator_id
+         from rooms r join room_members rm on rm.room_id = r.id
+         where rm.user_id = ? and r.creator_id <> ?`
+      )
+      .all(userId, userId)) {
+      if (userSockets.has(room.creator_id)) {
+        emitRoomSummary(room.id);
+      }
+    }
+  }
+
   function publishMessage(roomId: string, message: ChatMessage) {
     io.to(`room:${roomId}`).emit("message:created", message);
     emitRoomSummary(roomId);
+  }
+
+  function deleteMessages(
+    messages: Array<{ roomId: string; messageId: string }>
+  ) {
+    for (const message of messages) {
+      io.to(`room:${message.roomId}`).emit("message:deleted", message);
+      emitRoomSummary(message.roomId);
+    }
   }
 
   return {
@@ -250,11 +229,15 @@ export function createRealtimeHub(
     onlineUserIds,
     emitRoomSummary,
     publishMessage,
+    deleteMessages,
     notifyJoinRequest,
     joinUserToRoom,
     deleteRoom,
     close: () =>
       new Promise<void>((resolve) => {
+        for (const timer of offlineTimers.values()) {
+          clearTimeout(timer);
+        }
         io.close(() => resolve());
       }),
   };

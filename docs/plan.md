@@ -2,14 +2,14 @@
 
 ## Product
 
-Quick Send is a LAN-only room chat and direct file-transfer web app. One device
+Quick Send is a LAN-only room chat and file-transfer web app. One device
 runs the Bun service. Other devices on the same LAN open
 `http://quick.local:1355` through Portless LAN mode.
 
 - UI: React 19, TanStack Router, HeroUI, Tailwind CSS v4, Jotai
 - API: Hono REST + Socket.IO over WebSocket only
-- Storage: SQLite on the service device
-- File bytes: WebRTC DataChannel, never relayed or stored by the service
+- Storage: SQLite and a local file cache on the service device
+- File bytes: uploaded and downloaded through same-origin HTTP
 - Text and file metadata: stored as plaintext in SQLite
 - Language: English, light theme, mobile-first with a two-column desktop layout
 
@@ -32,6 +32,10 @@ activity. Quick Send does not use cookies.
 - A creator's active rooms do not reuse the same name.
 - Different creators may have rooms with the same name.
 - Rooms are discoverable by default.
+- A room is visible to other devices only while its creator is online.
+- Creator disconnects use a 30-second grace period before the room is hidden.
+- Hidden rooms retain membership, requests and messages, then reappear when the
+  creator reconnects.
 - The creator can permanently delete a room after typing its name.
 - Member removal, leaving, ownership transfer, renaming, hiding and archive are
   outside MVP scope.
@@ -58,9 +62,10 @@ pending and full rooms are omitted. Creator online status is shown.
 ## Messages
 
 - Text limit: 8 KB UTF-8.
-- File limit: 500 MB.
+- File limit: 200 MB.
 - Image preview limit: 200 KB, longest edge 640 px.
-- Messages persist until the room is deleted.
+- Text messages persist until the room is deleted. File messages expire after
+  three days.
 - No message deletion, edit, read receipt, typing state, search, pin or forward.
 - History uses an opaque `(createdAt, id)` cursor, 50 messages per request.
 - Earlier history loads only when the user presses `Load earlier`.
@@ -68,18 +73,16 @@ pending and full rooms are omitted. Creator online status is shown.
 
 ## File Transfer
 
-File metadata creates a 30-minute offer. The sender tab keeps the `File` object
-in memory. Refresh, disconnect, service restart or room deletion makes its
-offers unavailable.
+The browser calculates an incremental lowercase MD5 before upload. MD5 is the
+global `fileId`, so identical bytes referenced by different devices or rooms
+share one physical file. The service also verifies SHA-256, size and MD5 while
+streaming the upload to disk.
 
-- LAN host ICE candidates only; no STUN, TURN or server relay.
-- One active transfer per sender and receiver.
-- One offer may be downloaded by multiple members sequentially.
-- The sender tab must remain online.
-- Transfer progress updates at most every 100 ms.
-- There is no cancel button or transfer queue.
-- Failed transfers can be retried while the offer remains available.
-- Completed files download automatically and can be downloaded again.
+- File bytes and their message records expire after three days.
+- Cleanup runs at startup and once per minute.
+- A physical file is deleted only after its final message reference expires.
+- Room members can download an unexpired file without the sender being online.
+- Upload and download progress are shown in the chat UI.
 
 ## SQLite
 
@@ -95,7 +98,8 @@ Tables:
 - `room_members`
 - `join_requests`
 - `messages`
-- `file_offers`
+- `server_files`
+- `message_files`
 - `audit_logs`
 
 Room-owned rows use foreign keys with `ON DELETE CASCADE`. Audit rows retain a
@@ -113,6 +117,10 @@ room name snapshot and set `room_id` to null after deletion.
 - `POST /api/requests/:requestId/approve`
 - `POST /api/requests/:requestId/reject`
 - `GET /api/rooms/:roomId/messages`
+- `POST /api/rooms/:roomId/messages`
+- `POST /api/rooms/:roomId/files/prepare`
+- `PUT /api/rooms/:roomId/files/:fileId`
+- `GET /api/messages/:messageId/file`
 
 Errors use `{ "error": { "code": string, "message": string } }`. Request and
 response boundaries use ArkType. Mutations are not retried automatically.
@@ -130,26 +138,14 @@ Server rooms:
 Core client events:
 
 - `message:create`
-- `file:create`
-- `transfer:receive`
-- `transfer:complete`
-- `transfer:fail`
-- `rtc:offer`
-- `rtc:answer`
-- `rtc:candidate`
 
 Core server events:
 
 - `room:summary`
 - `room:deleted`
-- `join-request:created`
-- `join-request:resolved`
+- `join-request:changed`
 - `message:created`
-- `file-offer:updated`
-- `transfer:locked`
-- `rtc:offer`
-- `rtc:answer`
-- `rtc:candidate`
+- `message:deleted`
 
 Socket.IO handles heartbeat, timeout and reconnect. On reconnect the client
 reloads bootstrap and the current room rather than relying on missed events.

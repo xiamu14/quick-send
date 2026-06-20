@@ -58,26 +58,13 @@ export type RoomDetail = {
   pendingRequests: JoinRequest[];
 };
 
-export type FileOfferStatus =
-  | "available"
-  | "transferring"
-  | "expired"
-  | "sender_offline";
-
-export type FileOffer = {
-  id: string;
-  roomId: string;
-  senderUserId: string;
-  senderSocketId: string;
-  receiverUserId?: string;
+export type FileAttachment = {
+  fileId: string;
   name: string;
   size: number;
   mime: string;
   previewDataUrl?: string;
-  status: FileOfferStatus;
   expiresAt: number;
-  createdAt: number;
-  updatedAt: number;
 };
 
 export type ChatMessage = {
@@ -89,7 +76,7 @@ export type ChatMessage = {
   senderAvatarSeed: string;
   senderDeviceKind: DeviceKind;
   body?: string;
-  fileOffer?: FileOffer;
+  fileAttachment?: FileAttachment;
   createdAt: number;
 };
 

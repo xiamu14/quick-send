@@ -9,6 +9,8 @@ import { createTextMessage, listMessages } from "./messages";
 import {
   createRoom,
   deleteRoom,
+  getRoomDetail,
+  listDiscoverRooms,
   listRoomSummaries,
   requestToJoin,
   resolveJoinRequest,
@@ -76,6 +78,22 @@ describe("identity", () => {
         .map((room) => room.name)
     ).toEqual(["New room"]);
   });
+
+  test("prunes orphaned identity records during migration", () => {
+    const path = testDatabasePath();
+    seedOrphanedV3Database(path);
+    const database = openDatabase(path);
+    databases.push({ database, path });
+
+    expect(database.query("pragma foreign_key_check").all()).toEqual([]);
+    expect(
+      database
+        .query<{ actor_user_id: string | null }, []>(
+          "select actor_user_id from audit_logs where id = 'orphan-audit'"
+        )
+        .get()?.actor_user_id
+    ).toBeNull();
+  });
 });
 
 describe("rooms and messages", () => {
@@ -87,8 +105,28 @@ describe("rooms and messages", () => {
     const requestId = requestToJoin(database, room.id, guest);
     resolveJoinRequest(database, requestId, creator.id, "approved");
 
+    const online = new Set([creator.id]);
+    expect(listRoomSummaries(database, creator.id, online).length).toBe(1);
+    expect(listRoomSummaries(database, guest.id, online).length).toBe(1);
+  });
+
+  test("hides a room from other devices while its creator is offline", () => {
+    const { database } = createTestDatabase();
+    const creator = insertUser(database, "OnlineOwner");
+    const guest = insertUser(database, "Visitor");
+    const room = createRoom(database, creator);
+
+    expect(listDiscoverRooms(database, guest.id, new Set())).toEqual([]);
+    expect(
+      getRoomDetail(database, room.id, guest.id, new Set())
+    ).toBeUndefined();
     expect(listRoomSummaries(database, creator.id, new Set()).length).toBe(1);
-    expect(listRoomSummaries(database, guest.id, new Set()).length).toBe(1);
+
+    const online = new Set([creator.id]);
+    expect(listDiscoverRooms(database, guest.id, online).length).toBe(1);
+    expect(getRoomDetail(database, room.id, guest.id, online)?.id).toBe(
+      room.id
+    );
   });
 
   test("paginates room history with an opaque cursor", () => {
@@ -215,7 +253,12 @@ function seedLegacyV2Database(path: string) {
       id text primary key,
       room_id text not null references rooms(id) on delete cascade,
       sender_user_id text not null references users(id),
-      file_offer_id text references file_offers(id) on delete cascade
+      client_message_id text not null,
+      kind text not null,
+      body text,
+      file_offer_id text references file_offers(id) on delete cascade,
+      created_at integer not null,
+      unique(sender_user_id, client_message_id)
     );
 
     create table audit_logs (
@@ -239,6 +282,92 @@ function seedLegacyV2Database(path: string) {
     insert into room_members(room_id, user_id, joined_at) values
       ('legacy-room', 'legacy-user', 1),
       ('fingerprint-room', 'fingerprint-user', 2);
+  `);
+  database.close();
+}
+
+function seedOrphanedV3Database(path: string) {
+  const database = new Database(path, { create: true });
+  database.exec(`
+    pragma foreign_keys = OFF;
+
+    create table schema_migrations (
+      version integer primary key,
+      applied_at integer not null
+    );
+    insert into schema_migrations(version, applied_at)
+    values(1, 1), (2, 2), (3, 3);
+
+    create table users (
+      id text primary key,
+      username text not null collate nocase unique,
+      avatar_seed text not null,
+      device_kind text not null,
+      fingerprint_hash text unique,
+      created_at integer not null
+    );
+
+    create table credentials (
+      id text primary key,
+      user_id text not null unique references users(id) on delete cascade,
+      token_hash text not null unique,
+      created_at integer not null,
+      last_used_at integer not null
+    );
+
+    create table rooms (
+      id text primary key,
+      name text not null,
+      creator_id text not null references users(id),
+      created_at integer not null
+    );
+
+    create table room_members (
+      room_id text not null references rooms(id) on delete cascade,
+      user_id text not null references users(id) on delete cascade,
+      joined_at integer not null,
+      primary key(room_id, user_id)
+    );
+
+    create table file_offers (
+      id text primary key,
+      room_id text not null references rooms(id) on delete cascade,
+      sender_user_id text not null references users(id),
+      receiver_user_id text references users(id),
+      status text not null,
+      updated_at integer not null
+    );
+
+    create table messages (
+      id text primary key,
+      room_id text not null references rooms(id) on delete cascade,
+      sender_user_id text not null references users(id),
+      client_message_id text not null,
+      kind text not null,
+      body text,
+      file_offer_id text references file_offers(id) on delete cascade,
+      created_at integer not null,
+      unique(sender_user_id, client_message_id)
+    );
+
+    create table audit_logs (
+      id text primary key,
+      actor_user_id text references users(id) on delete set null,
+      room_id text references rooms(id) on delete set null,
+      action text not null,
+      created_at integer not null
+    );
+
+    insert into credentials(
+      id, user_id, token_hash, created_at, last_used_at
+    ) values('orphan-credential', 'missing-user', 'token', 1, 1);
+
+    insert into room_members(room_id, user_id, joined_at)
+    values('missing-room', 'missing-user', 1);
+
+    insert into audit_logs(
+      id, actor_user_id, action, created_at
+    ) values('orphan-audit', 'missing-user', 'user_registered', 1);
   `);
   database.close();
 }
