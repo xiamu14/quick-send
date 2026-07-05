@@ -164,6 +164,18 @@ function migrate(database: Database) {
       .query("insert into schema_migrations(version, applied_at) values(6, ?)")
       .run(Date.now());
   }
+  if (current < 7) {
+    database.exec("alter table users add column device_id_hash text");
+    database.exec(
+      "update users set device_id_hash = fingerprint_hash where device_id_hash is null"
+    );
+    database.exec(
+      "create unique index if not exists users_device_id_hash_idx on users(device_id_hash)"
+    );
+    database
+      .query("insert into schema_migrations(version, applied_at) values(7, ?)")
+      .run(Date.now());
+  }
 }
 
 function migrateIdentityToV2(database: Database) {

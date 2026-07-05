@@ -10,7 +10,6 @@ const proxyPort = parsedLanUrl.port || "80";
 const lanIp = process.env.QUICK_SEND_LAN_IP ?? detectLanIp();
 const lanIpArgs = lanIp ? ["--ip", lanIp] : [];
 
-runPortless(["proxy", "stop"], { allowFailure: true });
 runPortless([
   "proxy",
   "start",
@@ -20,7 +19,7 @@ runPortless([
   "-p",
   proxyPort,
 ]);
-runPortless(["alias", "quick", String(serverPort)]);
+runPortless(["alias", "quick", String(serverPort), "--force"]);
 
 run(["bun", "run", "build:web"]);
 
@@ -76,7 +75,7 @@ function detectLanIp() {
   return candidates[0]?.address;
 }
 
-function runPortless(args: string[], options: { allowFailure?: boolean } = {}) {
+function runPortless(args: string[]) {
   const result = spawnSync(["portless", ...args], {
     cwd: process.cwd(),
     env: {
@@ -89,7 +88,7 @@ function runPortless(args: string[], options: { allowFailure?: boolean } = {}) {
     stdout: "inherit",
     stderr: "inherit",
   });
-  if (result.exitCode !== 0 && !options.allowFailure) {
+  if (result.exitCode !== 0) {
     process.exit(result.exitCode);
   }
 }

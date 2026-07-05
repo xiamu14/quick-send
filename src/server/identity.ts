@@ -21,6 +21,7 @@ export type IdentityResult = {
   user: User;
   credentialToken: string;
 };
+type IdentitySource = "browser" | "device";
 
 export function deviceKindFromUserAgent(userAgent: string): DeviceKind {
   if (tabletPattern.test(userAgent)) {
@@ -64,11 +65,18 @@ export function deviceNameFromUserAgent(userAgent: string) {
 
 export async function ensureIdentity(
   database: AppDatabase,
-  visitorId: string,
+  identityId: string,
   deviceKind: DeviceKind,
-  deviceName = "Unknown device"
+  deviceName = "Unknown device",
+  identitySource: IdentitySource = "browser"
 ): Promise<IdentityResult> {
-  const fingerprintHash = await hashToken(visitorId.trim());
+  const normalizedIdentity = identityId.trim();
+  const fingerprintHash =
+    identitySource === "browser" ? await hashToken(normalizedIdentity) : null;
+  const deviceIdHash =
+    identitySource === "device"
+      ? await hashToken(`device:${normalizedIdentity}`)
+      : await hashToken(normalizedIdentity);
   const existing = database
     .query<
       {
@@ -80,11 +88,17 @@ export async function ensureIdentity(
         created_at: number;
       },
       [string]
-    >("select * from users where fingerprint_hash = ?")
-    .get(fingerprintHash);
+    >("select * from users where device_id_hash = ?")
+    .get(deviceIdHash);
   const user = existing
     ? mapUser(existing)
-    : createFingerprintUser(database, fingerprintHash, deviceKind, deviceName);
+    : createIdentityUser(
+        database,
+        fingerprintHash,
+        deviceIdHash,
+        deviceKind,
+        deviceName
+      );
   if (
     existing &&
     (existing.device_kind !== deviceKind || existing.device_name !== deviceName)
@@ -176,9 +190,10 @@ export function updateUserDeviceFromUserAgent(
   return user;
 }
 
-function createFingerprintUser(
+function createIdentityUser(
   database: AppDatabase,
-  fingerprintHash: string,
+  fingerprintHash: string | null,
+  deviceIdHash: string,
   deviceKind: DeviceKind,
   deviceName: string
 ) {
@@ -194,7 +209,7 @@ function createFingerprintUser(
       createdAt: now,
     };
     try {
-      insertUser(database, user, fingerprintHash);
+      insertUser(database, user, fingerprintHash, deviceIdHash);
       audit(database, user.id, "user_auto_created");
       return user;
     } catch (error) {
@@ -210,21 +225,23 @@ function createFingerprintUser(
 function insertUser(
   database: AppDatabase,
   user: User,
-  fingerprintHash: string
+  fingerprintHash: string | null,
+  deviceIdHash: string
 ) {
   if (hasUserColumn(database, "totp_ciphertext")) {
     database
       .query(
         `insert into users(
           id, username, avatar_seed, device_kind, totp_ciphertext,
-          fingerprint_hash, device_name, created_at
-        ) values(?, ?, ?, ?, '', ?, ?, ?)`
+          device_id_hash, fingerprint_hash, device_name, created_at
+        ) values(?, ?, ?, ?, '', ?, ?, ?, ?)`
       )
       .run(
         user.id,
         user.username,
         user.avatarSeed,
         user.deviceKind,
+        deviceIdHash,
         fingerprintHash,
         user.deviceName,
         user.createdAt
@@ -234,15 +251,16 @@ function insertUser(
   database
     .query(
       `insert into users(
-        id, username, avatar_seed, device_kind, fingerprint_hash,
+        id, username, avatar_seed, device_kind, device_id_hash, fingerprint_hash,
         device_name, created_at
-      ) values(?, ?, ?, ?, ?, ?, ?)`
+      ) values(?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       user.id,
       user.username,
       user.avatarSeed,
       user.deviceKind,
+      deviceIdHash,
       fingerprintHash,
       user.deviceName,
       user.createdAt

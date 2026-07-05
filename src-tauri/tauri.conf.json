@@ -1,0 +1,82 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Quick Send",
+  "version": "0.1.0",
+  "identifier": "app.quicksend.desktop",
+  "build": {
+    "frontendDist": "../dist/client",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "bun run dev",
+    "beforeBuildCommand": "bun run build:web"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Quick Send",
+        "width": 1024,
+        "height": 680,
+        "resizable": true,
+        "fullscreen": false,
+        "maximizable": false,
+        "center": true,
+        "hiddenTitle": true,
+        "decorations": true,
+        "titleBarStyle": "Overlay",
+        "dragDropEnabled": true,
+        "windowEffects": {
+          "effects": ["fullScreenUI", "mica", "tabbed", "blur", "acrylic"],
+          "state": "active",
+          "radius": 8
+        }
+      }
+    ],
+    "security": {
+      "capabilities": ["default", "sendme:default", "sendme:android"],
+      "csp": {
+        "default-src": "'self' customprotocol:",
+        "connect-src": "ipc: http://ipc.localhost",
+        "font-src": "'self' blob: data: https:",
+        "img-src": "'self' blob: data:",
+        "style-src": "'unsafe-inline' 'self'",
+        "script-src": "'self'"
+      },
+      "devCsp": {
+        "default-src": "'self' customprotocol: http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*",
+        "connect-src": "ipc: http://ipc.localhost http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*",
+        "font-src": "'self' blob: data: https:",
+        "img-src": "'self' blob: data:",
+        "style-src": "'unsafe-inline' 'self'",
+        "script-src": "'self'"
+      },
+      "assetProtocol": {
+        "enable": false,
+        "scope": []
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "createUpdaterArtifacts": false,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": ["icons/128x128.png"],
+    "macOS": {},
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "",
+      "wix": {
+        "language": "en-US",
+        "fragmentPaths": ["WiX/context-menu.wxs"],
+        "componentRefs": ["ContextMenuRegistryFiles"]
+      }
+    }
+  }
+}

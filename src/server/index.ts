@@ -92,7 +92,10 @@ app.use("/api/*", async (context, next) => {
   await next();
 });
 
-const identityEnsureSchema = type({ visitorId: "string>8" });
+const identityEnsureSchema = type({
+  "visitorId?": "string>8",
+  "deviceId?": "string>8",
+});
 const deleteRoomSchema = type({ confirmation: "string" });
 const textMessageSchema = type({
   clientMessageId: "string",
@@ -110,12 +113,17 @@ const filePrepareSchema = type({
 app.post("/api/identity/ensure", async (context) =>
   route(context, async () => {
     const input = await parseJson(context.req.raw, identityEnsureSchema);
+    const identityId = input.deviceId ?? input.visitorId;
+    if (!identityId) {
+      throw new AppError("INVALID_PAYLOAD", "Device identity is required");
+    }
     const userAgent = context.req.header("user-agent") ?? "";
     const result: IdentityResult = await ensureIdentity(
       database,
-      input.visitorId,
+      identityId,
       deviceKindFromUserAgent(userAgent),
-      deviceNameFromUserAgent(userAgent)
+      deviceNameFromUserAgent(userAgent),
+      input.deviceId ? "device" : "browser"
     );
     return {
       user: result.user,

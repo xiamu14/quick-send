@@ -65,8 +65,8 @@ export function RoomsPage() {
     return <LoadingScreen />;
   }
   return (
-    <main className="min-h-dvh bg-blue-50">
-      <div className="mx-auto flex h-dvh max-w-3xl flex-col overflow-hidden bg-white shadow-sm">
+    <main className="min-h-dvh bg-white">
+      <div className="flex h-dvh w-full flex-col overflow-hidden bg-white">
         <RoomListHeader />
         <RoomList rooms={bootstrap.rooms} />
       </div>

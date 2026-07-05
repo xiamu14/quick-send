@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { post } from "@/lib/api";
+import { isTauriApp, pickNativePath, startNativeShare } from "@/lib/tauri";
 import { toast } from "@/lib/toast";
 import type { ChatMessage } from "@/shared/types";
 import { addMessage } from "@/store/app";
@@ -51,6 +53,27 @@ export function useFileCache(roomId: string, maxFileBytes: number) {
     }
   }
 
+  async function shareNativeFile(options?: { imageOnly?: boolean }) {
+    setUploading(true);
+    try {
+      const path = await pickNativePath(options);
+      if (!path) {
+        return;
+      }
+      const ticket = await startNativeShare(path);
+      const message = await post<ChatMessage>(`/api/rooms/${roomId}/messages`, {
+        clientMessageId: createRandomId(),
+        body: `altsendme:${ticket}`,
+      });
+      addMessage(message);
+      toast.success("File ticket shared");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "File share failed");
+    } finally {
+      setUploading(false);
+    }
+  }
+
   async function download(message: ChatMessage) {
     setProgress((current) => ({ ...current, [message.id]: 0 }));
     try {
@@ -97,5 +120,12 @@ export function useFileCache(roomId: string, maxFileBytes: number) {
     }
   }
 
-  return { download, open, progress, upload, uploading };
+  return {
+    download,
+    open,
+    progress,
+    shareNativeFile: isTauriApp() ? shareNativeFile : undefined,
+    upload,
+    uploading,
+  };
 }

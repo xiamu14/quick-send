@@ -213,8 +213,16 @@ export function RoomPage({ roomId }: { roomId: string }) {
             />
             <Composer
               connected={connected}
-              onFile={() => fileInput.current?.click()}
-              onImage={() => imageInput.current?.click()}
+              onFile={() =>
+                fileCache.shareNativeFile
+                  ? void fileCache.shareNativeFile()
+                  : fileInput.current?.click()
+              }
+              onImage={() =>
+                fileCache.shareNativeFile
+                  ? void fileCache.shareNativeFile({ imageOnly: true })
+                  : imageInput.current?.click()
+              }
               roomId={roomId}
               uploading={fileCache.uploading}
             />

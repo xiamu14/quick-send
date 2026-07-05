@@ -87,6 +87,33 @@ describe("identity", () => {
     });
   });
 
+  test("uses native device ids as stable identities", async () => {
+    const { database } = createTestDatabase();
+    const browser = await ensureIdentity(
+      database,
+      "shared-id",
+      "desktop",
+      "Mac OS"
+    );
+    const device = await ensureIdentity(
+      database,
+      "shared-id",
+      "mobile",
+      "iPhone",
+      "device"
+    );
+    const sameDevice = await ensureIdentity(
+      database,
+      "shared-id",
+      "mobile",
+      "iPhone",
+      "device"
+    );
+
+    expect(device.user.id).not.toBe(browser.user.id);
+    expect(sameDevice.user.id).toBe(device.user.id);
+  });
+
   test("prunes legacy MFA identities and rooms during migration", () => {
     const path = testDatabasePath();
     seedLegacyV2Database(path);

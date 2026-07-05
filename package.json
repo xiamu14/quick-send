@@ -7,6 +7,8 @@
     "@oslojs/encoding": "^1.1.0",
     "@tanstack/react-router": "^1.120.15",
     "@tanstack/react-start": "^1.120.15",
+    "@tauri-apps/api": "2.11.1",
+    "@tauri-apps/plugin-dialog": "2.7.1",
     "@vitejs/plugin-react": "^5.0.0",
     "arktype": "^2.2.0",
     "framer-motion": "^12.23.12",
@@ -24,12 +26,13 @@
     "@biomejs/biome": "2.4.16",
     "@tailwindcss/vite": "^4.1.12",
     "@tanstack/router-plugin": "^1.120.15",
+    "@tauri-apps/cli": "2.11.4",
     "@types/bun": "^1.2.21",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@types/react-window": "^1.8.8",
     "lefthook": "^2.1.9",
-    "portless": "^0.13.1",
+    "portless": "^0.15.1",
     "tailwindcss": "^4.1.12",
     "typescript": "^5.9.2",
     "ultracite": "7.8.3",
@@ -39,6 +42,7 @@
   "name": "quick-send",
   "scripts": {
     "dev": "bun run src/dev.ts",
+    "dev:mac": "tauri dev",
     "start": "bun run src/start.ts",
     "start:app": "bun run build:web && bun run src/server/index.ts",
     "build": "bun run build:web && bun run typecheck",
@@ -47,7 +51,8 @@
     "check": "ultracite check",
     "check:fix": "ultracite fix",
     "prepare": "lefthook install",
-    "test": "bun test"
+    "test": "bun test",
+    "tauri": "tauri"
   },
   "type": "module",
   "private": true
