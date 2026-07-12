@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "quick-send-v3",
+  "name": "quick",
   "main": "src/worker/index.ts",
   "compatibility_date": "2026-07-11",
   "compatibility_flags": ["nodejs_compat"],
@@ -22,6 +22,6 @@
     }
   ],
   "vars": {
-    "BETTER_AUTH_URL": "https://quick-send-v3.framer02.workers.dev"
+    "BETTER_AUTH_URL": "https://quick.framer02.workers.dev"
   }
 }
