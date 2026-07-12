@@ -1,17 +1,28 @@
+import { mkdirSync } from "node:fs";
 import { spawn } from "bun";
-import { prepareServer, serverPort, waitForServer } from "./run-utils";
 
-await prepareServer();
+mkdirSync("dist/client", { recursive: true });
 
-const server = spawn(["bun", "run", "src/server/index.ts"], {
+const migration = spawn(["bun", "run", "db:migrate:local"], {
   cwd: process.cwd(),
-  env: { ...process.env, PORT: String(serverPort) },
+  env: process.env,
   stdin: "inherit",
   stdout: "inherit",
   stderr: "inherit",
 });
 
-await waitForServer(server);
+const migrationCode = await migration.exited;
+if (migrationCode !== 0) {
+  process.exit(migrationCode);
+}
+
+const worker = spawn(["bun", "run", "dev:worker"], {
+  cwd: process.cwd(),
+  env: process.env,
+  stdin: "inherit",
+  stdout: "inherit",
+  stderr: "inherit",
+});
 
 const vite = spawn(["bunx", "vite"], {
   cwd: process.cwd(),
@@ -27,17 +38,18 @@ function stop(signal: NodeJS.Signals) {
     return;
   }
   stopping = true;
+  worker.kill(signal);
   vite.kill(signal);
-  server.kill(signal);
 }
 
 process.on("SIGINT", () => stop("SIGINT"));
 process.on("SIGTERM", () => stop("SIGTERM"));
 
 const result = await Promise.race([
-  server.exited.then((exitCode) => ({ source: "server", exitCode })),
-  vite.exited.then((exitCode) => ({ source: "vite", exitCode })),
+  worker.exited.then((exitCode) => ({ exitCode })),
+  vite.exited.then((exitCode) => ({ exitCode })),
 ]);
+
 stop("SIGTERM");
-await Promise.all([server.exited, vite.exited]);
+await Promise.all([worker.exited, vite.exited]);
 process.exit(result.exitCode);

@@ -1,3 +1,4 @@
+import { nanoid } from "nanoid";
 import type {
   DiscoverRoom,
   JoinRequest,
@@ -66,7 +67,7 @@ export function createRoom(database: AppDatabase, creator: User) {
   if (!name) {
     throw new AppError("ROOM_LIMIT_REACHED", "No room names available", 409);
   }
-  const room = { id: crypto.randomUUID(), name, createdAt: Date.now() };
+  const room = { id: nanoid(), name, createdAt: Date.now() };
   database.transaction(() => {
     database
       .query(
@@ -376,7 +377,7 @@ export function requestToJoin(
       409
     );
   }
-  const requestId = crypto.randomUUID();
+  const requestId = nanoid();
   database
     .query(
       `insert into join_requests(
@@ -613,12 +614,5 @@ function writeAudit(
         id, actor_user_id, room_id, room_name_snapshot, action, created_at
       ) values(?, ?, ?, ?, ?, ?)`
     )
-    .run(
-      crypto.randomUUID(),
-      actorUserId,
-      roomId,
-      roomName,
-      action,
-      Date.now()
-    );
+    .run(nanoid(), actorUserId, roomId, roomName, action, Date.now());
 }

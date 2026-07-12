@@ -1,0 +1,28 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "quick-send-v3",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-07-11",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "dist/client",
+    "not_found_handling": "single-page-application"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "quick-send-v3",
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "IMAGES",
+      "bucket_name": "quick-send-v3-images"
+    }
+  ],
+  "vars": {
+    "BETTER_AUTH_URL": "http://localhost:8787",
+    "BETTER_AUTH_SECRET": "dev-only-change-before-production"
+  }
+}

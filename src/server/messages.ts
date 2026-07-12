@@ -1,3 +1,4 @@
+import { nanoid } from "nanoid";
 import type {
   ChatMessage,
   FileAttachment,
@@ -45,7 +46,7 @@ export function createTextMessage(
     return existing;
   }
   const message: ChatMessage = {
-    id: crypto.randomUUID(),
+    id: nanoid(),
     roomId: input.roomId,
     kind: "text",
     senderUserId: sender.id,
@@ -112,7 +113,7 @@ export function createFileMessage(
     expiresAt: now + fileTtlMs,
   };
   const message: ChatMessage = {
-    id: crypto.randomUUID(),
+    id: nanoid(),
     roomId: input.roomId,
     kind: "file",
     senderUserId: sender.id,

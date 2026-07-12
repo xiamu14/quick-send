@@ -1,6 +1,7 @@
 node_modules/
 dist/
 data/
+.wrangler/
 src-tauri/target/
 .env.local
 .DS_Store

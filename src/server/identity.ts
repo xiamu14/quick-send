@@ -1,3 +1,4 @@
+import { nanoid } from "nanoid";
 import type { DeviceKind, User } from "@/shared/types";
 import { hashToken, randomToken } from "./crypto";
 import type { AppDatabase } from "./db";
@@ -119,7 +120,7 @@ export async function ensureIdentity(
         id, user_id, token_hash, created_at, last_used_at
       ) values(?, ?, ?, ?, ?)`
     )
-    .run(crypto.randomUUID(), user.id, credentialHash, now, now);
+    .run(nanoid(), user.id, credentialHash, now, now);
   return { user, credentialToken };
 }
 
@@ -308,5 +309,5 @@ function audit(database: AppDatabase, actorUserId: string, action: string) {
         id, actor_user_id, action, created_at
       ) values(?, ?, ?, ?)`
     )
-    .run(crypto.randomUUID(), actorUserId, action, Date.now());
+    .run(nanoid(), actorUserId, action, Date.now());
 }

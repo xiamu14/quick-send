@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { nanoid } from "nanoid";
 import type { User } from "@/shared/types";
 import { type AppDatabase, openDatabase } from "./db";
 import {
@@ -135,10 +136,7 @@ describe("server file cache", () => {
 });
 
 async function createResources() {
-  const databasePath = join(
-    tmpdir(),
-    `quick-send-${crypto.randomUUID()}.sqlite`
-  );
+  const databasePath = join(tmpdir(), `quick-send-${nanoid()}.sqlite`);
   const filesRoot = await mkdtemp(join(tmpdir(), "quick-send-files-"));
   const database = openDatabase(databasePath);
   resources.push({ database, databasePath, filesRoot });
@@ -148,9 +146,9 @@ async function createResources() {
 function insertUser(database: AppDatabase): User {
   const now = Date.now();
   const user: User = {
-    id: crypto.randomUUID(),
-    username: `User-${crypto.randomUUID().slice(0, 8)}`,
-    avatarSeed: crypto.randomUUID(),
+    id: nanoid(),
+    username: `User-${nanoid(8)}`,
+    avatarSeed: nanoid(),
     deviceKind: "desktop",
     deviceName: "Mac OS",
     createdAt: now,

@@ -4,6 +4,7 @@ import { link, mkdir, readdir, stat, unlink } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import { nanoid } from "nanoid";
 import type { AppDatabase } from "./db";
 import { AppError } from "./errors";
 import { hasRoomMembership, limits } from "./rooms";
@@ -44,7 +45,7 @@ export async function storeUploadedFile(
 
   const temporaryRoot = join(filesRoot, ".tmp");
   await mkdir(temporaryRoot, { recursive: true });
-  const temporaryPath = join(temporaryRoot, crypto.randomUUID());
+  const temporaryPath = join(temporaryRoot, nanoid());
   const md5 = createHash("md5");
   const sha256 = createHash("sha256");
   let received = 0;

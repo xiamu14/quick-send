@@ -5,7 +5,7 @@ import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type ProxyOptions } from "vite";
 
-const serverPort = Number(process.env.QUICK_SEND_PORT ?? 4173);
+const serverPort = Number(process.env.QUICK_SEND_API_PORT ?? 8787);
 const serverTarget = `http://127.0.0.1:${serverPort}`;
 
 function proxyOptions(options: ProxyOptions = {}): ProxyOptions {
@@ -39,11 +39,17 @@ export default defineConfig({
   server: {
     host: "0.0.0.0",
     port: 5173,
+    strictPort: true,
+    watch: {
+      ignored: [
+        "**/.wrangler/**",
+        "**/data/**",
+        "**/dist/**",
+        "**/src-tauri/gen/**",
+      ],
+    },
     proxy: {
       "/api": proxyOptions(),
-      "/socket.io": proxyOptions({
-        ws: true,
-      }),
     },
   },
   plugins: [tailwindcss(), tanstackRouter(), react()],

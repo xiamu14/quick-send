@@ -54,10 +54,11 @@ const bearerPattern = /^Bearer (.+)$/i;
 
 const releaseProcessLock = await acquireProcessLock();
 const database = openDatabase();
-const port = Number(process.env.PORT);
+const port = Number(process.env.PORT ?? process.env.QUICK_SEND_PORT ?? 4173);
 if (!Number.isFinite(port)) {
-  throw new Error("PORT is required");
+  throw new Error("PORT must be a valid TCP port");
 }
+const hostname = process.env.HOST ?? "127.0.0.1";
 
 const app = new Hono<{ Variables: Variables }>();
 const clientRoot = join(process.cwd(), "dist", "client");
@@ -361,7 +362,7 @@ app.get("*", async (context) => {
   });
 });
 
-const httpServer = serve({ fetch: app.fetch, port });
+const httpServer = serve({ fetch: app.fetch, hostname, port });
 const realtime = createRealtimeHub(
   httpServer as unknown as import("node:http").Server,
   database
@@ -425,6 +426,7 @@ console.log(
   JSON.stringify({
     level: "info",
     event: "server_started",
+    hostname,
     port,
   })
 );

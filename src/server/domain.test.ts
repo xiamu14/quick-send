@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
+import { nanoid } from "nanoid";
 import type { User } from "@/shared/types";
 import { type AppDatabase, openDatabase } from "./db";
 import {
@@ -238,10 +239,7 @@ function createTestDatabase() {
 }
 
 function testDatabasePath() {
-  return join(
-    process.env.TMPDIR ?? "/tmp",
-    `quick-send-${crypto.randomUUID()}.sqlite`
-  );
+  return join(process.env.TMPDIR ?? "/tmp", `quick-send-${nanoid()}.sqlite`);
 }
 
 function seedLegacyV2Database(path: string) {
@@ -430,9 +428,9 @@ function seedOrphanedV3Database(path: string) {
 
 function insertUser(database: AppDatabase, username: string): User {
   const user: User = {
-    id: crypto.randomUUID(),
+    id: nanoid(),
     username,
-    avatarSeed: crypto.randomUUID(),
+    avatarSeed: nanoid(),
     deviceKind: "desktop",
     deviceName: "Mac OS",
     createdAt: Date.now(),
