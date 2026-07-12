@@ -22,7 +22,6 @@
     }
   ],
   "vars": {
-    "BETTER_AUTH_URL": "https://quick-send-v3.framer02.workers.dev",
-    "BETTER_AUTH_SECRET": "dev-only-change-before-production"
+    "BETTER_AUTH_URL": "https://quick-send-v3.framer02.workers.dev"
   }
 }
