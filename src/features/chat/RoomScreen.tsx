@@ -216,12 +216,12 @@ export function RoomPage({ roomId }: { roomId: string }) {
               onFile={() =>
                 fileCache.shareNativeFile
                   ? void fileCache.shareNativeFile()
-                  : fileInput.current?.click()
+                  : clickUploadInput("file", fileInput.current)
               }
               onImage={() =>
                 fileCache.shareNativeFile
                   ? void fileCache.shareNativeFile({ imageOnly: true })
-                  : imageInput.current?.click()
+                  : clickUploadInput("image", imageInput.current)
               }
               roomId={roomId}
               uploading={fileCache.uploading}
@@ -255,6 +255,7 @@ export function RoomPage({ roomId }: { roomId: string }) {
         hidden
         onChange={(event) => {
           const file = event.currentTarget.files?.[0];
+          debugUploadInput("file_change", file);
           event.currentTarget.value = "";
           void fileCache.upload(file);
         }}
@@ -266,6 +267,7 @@ export function RoomPage({ roomId }: { roomId: string }) {
         hidden
         onChange={(event) => {
           const file = event.currentTarget.files?.[0];
+          debugUploadInput("image_change", file);
           event.currentTarget.value = "";
           void fileCache.upload(file);
         }}
@@ -274,6 +276,26 @@ export function RoomPage({ roomId }: { roomId: string }) {
       />
     </main>
   );
+}
+
+function clickUploadInput(
+  kind: "file" | "image",
+  input: HTMLInputElement | null
+) {
+  debugUploadInput(`${kind}_button_press`);
+  input?.click();
+}
+
+function debugUploadInput(event: string, file?: File) {
+  if (!import.meta.env.DEV) {
+    return;
+  }
+  console.debug("[upload]", {
+    event,
+    file: file
+      ? { name: file.name, size: file.size, type: file.type }
+      : undefined,
+  });
 }
 
 function RoomHeader({ room }: { room: RoomDetail }) {
@@ -810,7 +832,6 @@ function DeviceIcon({
   } else if (kind === "tablet") {
     Icon = TabletIcon;
   }
-  console.log("kind", kind);
   return (
     <div
       className={`grid size-10 shrink-0 place-items-center text-white ${colors[index]}`}

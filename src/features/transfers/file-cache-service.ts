@@ -24,7 +24,9 @@ export async function uploadCachedFile(
   metadata: Omit<FileMetadata, "fileId" | "name" | "size" | "mime">,
   onProgress: (progress: number) => void
 ) {
+  debugUpload("hash_start", file);
   const fileId = await hashFile(file, (progress) => onProgress(progress * 0.2));
+  debugUpload("hash_done", file, { fileId });
   const input: FileMetadata = {
     ...metadata,
     fileId,
@@ -32,18 +34,44 @@ export async function uploadCachedFile(
     size: file.size,
     mime: file.type || "application/octet-stream",
   };
+  debugUpload("prepare_start", file, { fileId });
   let result = await prepareFile(roomId, input);
+  debugUpload("prepare_done", file, {
+    fileId,
+    uploadRequired: result.uploadRequired,
+  });
   if (result.uploadRequired) {
+    debugUpload("put_start", file, { fileId });
     await uploadBytes(roomId, fileId, file, (progress) =>
       onProgress(0.2 + progress * 0.8)
     );
+    debugUpload("put_done", file, { fileId });
     result = await prepareFile(roomId, input);
+    debugUpload("prepare_after_put_done", file, {
+      fileId,
+      uploadRequired: result.uploadRequired,
+    });
   }
   if (result.uploadRequired) {
     throw new Error("Server did not retain the uploaded file");
   }
   onProgress(1);
   return result.message;
+}
+
+function debugUpload(
+  event: string,
+  file: File,
+  extra: Record<string, unknown> = {}
+) {
+  if (!import.meta.env.DEV) {
+    return;
+  }
+  console.debug("[upload]", {
+    event,
+    file: { name: file.name, size: file.size, type: file.type },
+    ...extra,
+  });
 }
 
 export async function downloadCachedFile(

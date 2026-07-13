@@ -24,6 +24,14 @@ export async function storeUploadedFile(
   },
   filesRoot = defaultFilesRoot
 ) {
+  logUpload("store_start", {
+    roomId: input.roomId,
+    userId: input.userId,
+    fileId: input.fileId,
+    expectedSize: input.expectedSize,
+    contentLength: request.headers.get("content-length"),
+    contentType: request.headers.get("content-type"),
+  });
   validateUploadInput(input.fileId, input.expectedSize);
   if (!hasRoomMembership(database, input.roomId, input.userId)) {
     throw new AppError("FORBIDDEN", "Room membership is required", 403);
@@ -33,6 +41,10 @@ export async function storeUploadedFile(
     if (existing.size !== input.expectedSize) {
       throw hashConflict();
     }
+    logUpload("store_deduplicated", {
+      fileId: input.fileId,
+      expectedSize: input.expectedSize,
+    });
     return { fileId: input.fileId, deduplicated: true };
   }
   if (!request.body) {
@@ -70,6 +82,11 @@ export async function storeUploadedFile(
       verifier,
       createWriteStream(temporaryPath, { flags: "wx" })
     );
+    logUpload("store_body_received", {
+      fileId: input.fileId,
+      expectedSize: input.expectedSize,
+      received,
+    });
     if (received !== input.expectedSize) {
       throw new AppError(
         "FILE_SIZE_MISMATCH",
@@ -80,6 +97,11 @@ export async function storeUploadedFile(
     const actualMd5 = md5.digest("hex");
     const actualSha256 = sha256.digest("hex");
     if (actualMd5 !== input.fileId) {
+      logUpload("store_hash_mismatch", {
+        fileId: input.fileId,
+        actualMd5,
+        received,
+      });
       throw new AppError("FILE_HASH_MISMATCH", "File MD5 does not match", 400);
     }
     const current = getStoredFile(database, input.fileId);
@@ -116,8 +138,19 @@ export async function storeUploadedFile(
     if (!stored || stored.size !== received || stored.sha256 !== actualSha256) {
       throw hashConflict();
     }
+    logUpload("store_done", {
+      fileId: input.fileId,
+      received,
+      storagePath,
+    });
     return { fileId: input.fileId, deduplicated: Boolean(current) };
   } catch (error) {
+    logUpload("store_failed", {
+      fileId: input.fileId,
+      expectedSize: input.expectedSize,
+      received,
+      message: errorMessage(error),
+    });
     await unlink(temporaryPath).catch(() => undefined);
     throw error;
   }
@@ -253,4 +286,14 @@ function isFileMissingError(error: unknown) {
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;
+}
+
+function logUpload(event: string, data: Record<string, unknown>) {
+  console.log(
+    JSON.stringify({ level: "info", event: `file_upload_${event}`, ...data })
+  );
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Unknown error";
 }

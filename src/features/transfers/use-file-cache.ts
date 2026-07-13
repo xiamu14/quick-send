@@ -17,6 +17,7 @@ export function useFileCache(roomId: string, maxFileBytes: number) {
   const [uploading, setUploading] = useState(false);
 
   async function upload(file: File | undefined) {
+    debugUpload("input_change", file);
     if (!file) {
       return;
     }
@@ -29,6 +30,9 @@ export function useFileCache(roomId: string, maxFileBytes: number) {
       const previewDataUrl = file.type.startsWith("image/")
         ? await createImagePreview(file).catch(() => undefined)
         : undefined;
+      debugUpload("preview_ready", file, {
+        hasPreview: Boolean(previewDataUrl),
+      });
       const message = await uploadCachedFile(
         roomId,
         file,
@@ -41,6 +45,9 @@ export function useFileCache(roomId: string, maxFileBytes: number) {
       addMessage(message);
       toast.success("File uploaded");
     } catch (error) {
+      debugUpload("failed", file, {
+        message: error instanceof Error ? error.message : String(error),
+      });
       toast.error(
         error instanceof Error ? error.message : "File upload failed"
       );
@@ -128,4 +135,21 @@ export function useFileCache(roomId: string, maxFileBytes: number) {
     upload,
     uploading,
   };
+}
+
+function debugUpload(
+  event: string,
+  file?: File,
+  extra: Record<string, unknown> = {}
+) {
+  if (!import.meta.env.DEV) {
+    return;
+  }
+  console.debug("[upload]", {
+    event,
+    file: file
+      ? { name: file.name, size: file.size, type: file.type }
+      : undefined,
+    ...extra,
+  });
 }

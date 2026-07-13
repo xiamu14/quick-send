@@ -53,12 +53,12 @@ app.post("/api/auth/email-exists", async (context) => {
 
 app.on(["GET", "POST"], "/api/auth/*", (context) => {
   const db = drizzle(context.env.DB, { schema });
-  return createAuth(context.env, db).handler(context.req.raw);
+  return createAuth(context.env, db, context.req.raw).handler(context.req.raw);
 });
 
 app.use("/api/*", async (context, next) => {
   const db = drizzle(context.env.DB, { schema });
-  const auth = createAuth(context.env, db);
+  const auth = createAuth(context.env, db, context.req.raw);
   const session = await auth.api.getSession({
     headers: context.req.raw.headers,
   });
@@ -130,6 +130,7 @@ app.get("/api/messages", async (context) => {
   const user = context.get("user");
   const sourceDeviceId = context.req.query("sourceDeviceId");
   const localDate = context.req.query("localDate");
+  const timezone = context.req.query("timezone");
   if (!sourceDeviceId) {
     return context.json({ error: "sourceDeviceId is required" }, 400);
   }
@@ -148,8 +149,17 @@ app.get("/api/messages", async (context) => {
     .where(and(...filters))
     .orderBy(desc(messages.createdAt))
     .limit(100);
+  logSync("messages_list", {
+    sourceDeviceId,
+    localDate,
+    timezone,
+    count: rows.length,
+    latestId: rows[0]?.messages.id,
+    latestLocalDate: rows[0]?.messages.localDate,
+    latestDeviceId: rows[0]?.messages.senderDeviceId,
+  });
   return context.json({
-    messages: rows.map((row) => ({
+    messages: rows.reverse().map((row) => ({
       ...row.messages,
       image: row.image_objects,
     })),
@@ -193,6 +203,71 @@ app.post("/api/messages/image", async (context) => {
   if (device.revokedAt) {
     return context.json({ error: "Device is revoked" }, 403);
   }
+  const input = await context.req.json<{
+    mime?: string;
+    name?: string;
+    size?: number;
+    timezone?: string;
+  }>();
+  if (!(input.mime && imageTypes.has(input.mime))) {
+    return context.json({ error: "Unsupported image type" }, 400);
+  }
+  if (!(input.size && input.size > 0 && input.size <= maxImageBytes)) {
+    return context.json({ error: "Image is larger than 20 MB" }, 400);
+  }
+  const now = new Date();
+  const messageId = nanoid();
+  const expiresAt = new Date(now.getTime() + retentionMs);
+  const message = {
+    id: messageId,
+    userId: context.get("user").id,
+    senderDeviceId: device.id,
+    senderDeviceNameSnapshot: device.displayName,
+    kind: "image" as const,
+    body: "pending",
+    localDate: localDate(now, input.timezone),
+    expiresAt,
+    deletedAt: null,
+    createdAt: now,
+  };
+  await db.insert(messages).values(message);
+  logSync("image_pending_created", {
+    messageId,
+    deviceId: device.id,
+    localDate: message.localDate,
+    timezone: input.timezone,
+    imageType: input.mime,
+    imageSize: input.size,
+  });
+  return context.json({ message: { ...message, image: null } });
+});
+
+app.post("/api/messages/:messageId/image", async (context) => {
+  const db = drizzle(context.env.DB, { schema });
+  const device = await ensureCurrentDevice(context, db);
+  if (device.revokedAt) {
+    return context.json({ error: "Device is revoked" }, 403);
+  }
+  const messageId = context.req.param("messageId");
+  const existing = await db
+    .select()
+    .from(messages)
+    .leftJoin(imageObjects, eq(messages.id, imageObjects.messageId))
+    .where(
+      and(
+        eq(messages.id, messageId),
+        eq(messages.userId, context.get("user").id),
+        eq(messages.senderDeviceId, device.id),
+        isNull(messages.deletedAt)
+      )
+    )
+    .get();
+  if (!(existing?.messages.kind === "image")) {
+    return context.json({ error: "Image message not found" }, 404);
+  }
+  if (existing.image_objects) {
+    return context.json({ error: "Image already uploaded" }, 409);
+  }
   const form = await context.req.formData();
   const image = form.get("image");
   const thumbnail = form.get("thumbnail");
@@ -208,8 +283,6 @@ app.post("/api/messages/image", async (context) => {
   if (image.size > maxImageBytes) {
     return context.json({ error: "Image is larger than 20 MB" }, 400);
   }
-  const now = new Date();
-  const messageId = nanoid();
   const imageId = nanoid();
   const originalKey = `${context.get("user").id}/${messageId}/original`;
   const thumbnailKey = `${context.get("user").id}/${messageId}/thumbnail`;
@@ -219,20 +292,6 @@ app.post("/api/messages/image", async (context) => {
   await context.env.IMAGES.put(thumbnailKey, await thumbnail.arrayBuffer(), {
     httpMetadata: { contentType: thumbnail.type },
   });
-  const expiresAt = new Date(now.getTime() + retentionMs);
-  const message = {
-    id: messageId,
-    userId: context.get("user").id,
-    senderDeviceId: device.id,
-    senderDeviceNameSnapshot: device.displayName,
-    kind: "image" as const,
-    body: null,
-    localDate: localDate(now, String(form.get("timezone") ?? "")),
-    expiresAt,
-    deletedAt: null,
-    createdAt: now,
-  };
-  await db.insert(messages).values(message);
   await db.insert(imageObjects).values({
     id: imageId,
     messageId,
@@ -243,10 +302,33 @@ app.post("/api/messages/image", async (context) => {
     size: image.size,
     width: numberValue(form.get("width")),
     height: numberValue(form.get("height")),
-    expiresAt,
-    createdAt: now,
+    expiresAt: existing.messages.expiresAt,
+    createdAt: new Date(),
   });
-  return context.json({ message: { ...message, image: { id: imageId } } });
+  await db
+    .update(messages)
+    .set({ body: null })
+    .where(eq(messages.id, messageId));
+  logSync("image_created", {
+    messageId,
+    imageId,
+    deviceId: device.id,
+    localDate: existing.messages.localDate,
+    imageType: image.type,
+    imageSize: image.size,
+  });
+  return context.json({
+    message: {
+      ...existing.messages,
+      body: null,
+      image: {
+        id: imageId,
+        name: image.name || "image",
+        mime: image.type,
+        size: image.size,
+      },
+    },
+  });
 });
 
 app.get("/api/images/:imageId", async (context) => {
@@ -297,6 +379,12 @@ app.delete("/api/messages/:messageId", async (context) => {
     );
   return context.json({ ok: true });
 });
+
+function logSync(event: string, data: Record<string, unknown>) {
+  console.log(
+    JSON.stringify({ level: "info", event: `sync_${event}`, ...data })
+  );
+}
 
 export default {
   fetch: app.fetch,

@@ -9,9 +9,14 @@ const privateLan192Pattern = /^192\.168\.\d{1,3}\.\d{1,3}$/;
 const privateLan10Pattern = /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
 const privateLan172Pattern = /^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/;
 
-export function createAuth(env: Env, database: AuthDatabase) {
+export function createAuth(
+  env: Env,
+  database: AuthDatabase,
+  request?: Request
+) {
+  const baseURL = authBaseURL(env, request);
   return betterAuth({
-    baseURL: env.BETTER_AUTH_URL,
+    baseURL,
     secret: env.BETTER_AUTH_SECRET,
     trustedOrigins: (request) => trustedOrigins(env, request),
     database: drizzleAdapter(database, {
@@ -23,6 +28,18 @@ export function createAuth(env: Env, database: AuthDatabase) {
       minPasswordLength: 8,
     },
   });
+}
+
+function authBaseURL(env: Env, request: Request | undefined) {
+  const origin = request?.headers.get("origin");
+  if (origin && isDevOrigin(origin)) {
+    return origin;
+  }
+  const host = request?.headers.get("host");
+  if (host && isDevHost(host)) {
+    return `http://${host}`;
+  }
+  return env.BETTER_AUTH_URL;
 }
 
 function trustedOrigins(env: Env, request: Request | undefined) {
@@ -56,6 +73,14 @@ function isDevOrigin(origin: string) {
       privateLan10Pattern.test(url.hostname) ||
       privateLan172Pattern.test(url.hostname)
     );
+  } catch {
+    return false;
+  }
+}
+
+function isDevHost(host: string) {
+  try {
+    return isDevOrigin(`http://${host}`);
   } catch {
     return false;
   }

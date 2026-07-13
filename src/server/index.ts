@@ -280,12 +280,24 @@ app.post("/api/rooms/:roomId/files/prepare", async (context) =>
   route(context, async () => {
     const input = await parseJson(context.req.raw, filePrepareSchema);
     const roomId = context.req.param("roomId");
+    logUpload("prepare_start", context, {
+      roomId,
+      fileId: input.fileId,
+      size: input.size,
+      mime: input.mime,
+      hasPreview: Boolean(input.previewDataUrl),
+    });
     requireVisibleRoom(roomId, context.get("user").id);
     if (!hasRoomMembership(database, roomId, context.get("user").id)) {
       throw new AppError("FORBIDDEN", "Room membership is required", 403);
     }
     const available = isStoredFileAvailable(database, input.fileId, input.size);
     if (!available) {
+      logUpload("prepare_upload_required", context, {
+        roomId,
+        fileId: input.fileId,
+        size: input.size,
+      });
       return { uploadRequired: true as const };
     }
     const message = createFileMessage(database, context.get("user"), {
@@ -293,9 +305,19 @@ app.post("/api/rooms/:roomId/files/prepare", async (context) =>
       ...input,
     });
     if (!message) {
+      logUpload("prepare_message_missing", context, {
+        roomId,
+        fileId: input.fileId,
+        size: input.size,
+      });
       return { uploadRequired: true as const };
     }
     realtime.publishMessage(roomId, message);
+    logUpload("prepare_message_created", context, {
+      roomId,
+      fileId: input.fileId,
+      messageId: message.id,
+    });
     return { uploadRequired: false as const, message };
   })
 );
@@ -303,12 +325,23 @@ app.post("/api/rooms/:roomId/files/prepare", async (context) =>
 app.put("/api/rooms/:roomId/files/:fileId", (context) =>
   route(context, () => {
     const expectedSize = Number(context.req.query("size"));
-    requireVisibleRoom(context.req.param("roomId"), context.get("user").id);
-    return storeUploadedFile(database, context.req.raw, {
-      roomId: context.req.param("roomId"),
-      userId: context.get("user").id,
-      fileId: context.req.param("fileId"),
+    const roomId = context.req.param("roomId");
+    const fileId = context.req.param("fileId");
+    logUpload("put_start", context, {
+      roomId,
+      fileId,
       expectedSize,
+      contentLength: context.req.header("content-length"),
+    });
+    requireVisibleRoom(roomId, context.get("user").id);
+    return storeUploadedFile(database, context.req.raw, {
+      roomId,
+      userId: context.get("user").id,
+      fileId,
+      expectedSize,
+    }).then((result) => {
+      logUpload("put_done", context, result);
+      return result;
     });
   })
 );
@@ -393,6 +426,22 @@ function logCleanupError(error: unknown) {
       level: "error",
       event: "file_cache_cleanup_failed",
       message: error instanceof Error ? error.message : "Unknown error",
+    })
+  );
+}
+
+function logUpload(
+  event: string,
+  context: Context<{ Variables: Variables }>,
+  data: Record<string, unknown>
+) {
+  console.log(
+    JSON.stringify({
+      level: "info",
+      event: `file_upload_${event}`,
+      userId: context.get("user")?.id,
+      userAgent: context.req.header("user-agent"),
+      ...data,
     })
   );
 }

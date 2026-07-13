@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { Copy, LogOut, Send, Upload } from "lucide-react";
 import { nanoid } from "nanoid";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/")({
@@ -125,6 +125,7 @@ function InboxScreen() {
   const queryClient = useQueryClient();
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>();
   const [selectedDate, setSelectedDate] = useState<string>();
+  const timelineEnd = useRef<HTMLDivElement>(null);
   const bootstrap = useQuery({
     queryKey: ["bootstrap"],
     queryFn: () => api<Bootstrap>("/api/bootstrap"),
@@ -154,6 +155,9 @@ function InboxScreen() {
       setSelectedDeviceId(currentDevice.id);
     }
   }, [currentDevice?.id, selectedDeviceId]);
+  useEffect(() => {
+    timelineEnd.current?.scrollIntoView({ block: "end" });
+  });
   const signOut = useMutation({
     mutationFn: () => authApi("/api/auth/sign-out", { method: "POST" }),
     onSuccess: () => location.reload(),
@@ -250,6 +254,7 @@ function InboxScreen() {
               {(messages.data?.messages ?? []).map((message) => (
                 <MessageItem key={message.id} message={message} />
               ))}
+              <div ref={timelineEnd} />
               {messages.data?.messages.length === 0 ? (
                 <div className="pt-24 text-center text-slate-500">
                   No messages yet
@@ -259,12 +264,36 @@ function InboxScreen() {
           )}
         </div>
         <Composer
+          activeDate={activeDate}
+          activeDeviceId={activeDeviceId}
           disabled={!currentDevice}
-          onSent={() =>
-            queryClient.invalidateQueries({
+          onSent={async (message) => {
+            syncLog("invalidate_start", {
+              activeDeviceId,
+              activeDate,
+              messageId: message?.id,
+              messageLocalDate: message?.localDate,
+              messageDeviceId: message?.senderDeviceId,
+            });
+            await queryClient.invalidateQueries({
               queryKey: ["messages", activeDeviceId],
-            })
-          }
+            });
+            const cached = queryClient.getQueryData<{ messages: Message[] }>([
+              "messages",
+              activeDeviceId,
+              activeDate,
+            ]);
+            syncLog("invalidate_done", {
+              activeDeviceId,
+              activeDate,
+              messageId: message?.id,
+              cachedCount: cached?.messages.length,
+              cachedHasMessage: Boolean(
+                message &&
+                  cached?.messages.some((item) => item.id === message.id)
+              ),
+            });
+          }}
         />
       </section>
     </main>
@@ -298,7 +327,11 @@ function messageContent(message: Message) {
     return <p className="whitespace-pre-wrap text-sm">{message.body}</p>;
   }
   if (!message.image) {
-    return null;
+    return (
+      <div className="flex h-40 items-center justify-center rounded-md border border-slate-300 border-dashed bg-slate-50 text-slate-500 text-sm">
+        Uploading image…
+      </div>
+    );
   }
   return (
     <a
@@ -325,11 +358,15 @@ async function copyMessageText(text: string) {
 }
 
 function Composer({
+  activeDate,
+  activeDeviceId,
   disabled,
   onSent,
 }: {
+  activeDate: string | undefined;
+  activeDeviceId: string | undefined;
   disabled: boolean;
-  onSent: () => void;
+  onSent: (message?: Message) => void | Promise<void>;
 }) {
   const [body, setBody] = useState("");
   const text = useMutation({
@@ -348,22 +385,58 @@ function Composer({
   });
   const image = useMutation({
     mutationFn: async (file: File) => {
+      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      syncLog("image_upload_start", {
+        activeDeviceId,
+        activeDate,
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        timezone,
+      });
+      const pending = await api<{ message: Message }>("/api/messages/image", {
+        method: "POST",
+        body: {
+          mime: file.type,
+          name: file.name || "image",
+          size: file.size,
+          timezone,
+        },
+      });
+      await onSent(pending.message);
       const form = new FormData();
       form.set("image", file);
       form.set("thumbnail", file);
-      form.set("timezone", Intl.DateTimeFormat().resolvedOptions().timeZone);
-      const response = await fetch("/api/messages/image", {
-        method: "POST",
-        headers: await deviceHeaders(),
-        credentials: "include",
-        body: form,
-      });
+      form.set("timezone", timezone);
+      const response = await fetch(
+        `/api/messages/${pending.message.id}/image`,
+        {
+          method: "POST",
+          headers: await deviceHeaders(),
+          credentials: "include",
+          body: form,
+        }
+      );
       if (!response.ok) {
         throw new Error(await errorMessage(response));
       }
-      return response.json();
+      const payload = (await response.json()) as { message: Message };
+      syncLog("image_upload_done", {
+        activeDeviceId,
+        activeDate,
+        messageId: payload.message.id,
+        messageLocalDate: payload.message.localDate,
+        messageDeviceId: payload.message.senderDeviceId,
+      });
+      return payload;
     },
-    onSuccess: onSent,
+    onSuccess: (payload) => onSent(payload.message),
+    onError: (error) => {
+      syncLog("image_upload_error", {
+        message: error instanceof Error ? error.message : String(error),
+      });
+      showError(error);
+    },
   });
   return (
     <footer className="border-slate-200 border-t bg-white p-3">
@@ -417,6 +490,29 @@ function FullScreenSpinner() {
 
 function showError(error: Error) {
   toast.error(error.message || "Request failed");
+}
+
+function syncLog(event: string, data: Record<string, unknown> = {}) {
+  if (!syncDebugEnabled()) {
+    return;
+  }
+  console.log("[sync]", { event, ...data });
+}
+
+function syncDebugEnabled() {
+  if (import.meta.env.DEV) {
+    return true;
+  }
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("debug") === "true") {
+      window.localStorage.setItem("quick-send.debug", "true");
+      return true;
+    }
+    return window.localStorage.getItem("quick-send.debug") === "true";
+  } catch {
+    return false;
+  }
 }
 
 async function api<T>(
