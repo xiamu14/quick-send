@@ -2,9 +2,16 @@ import FingerprintJS from "@fingerprintjs/fingerprintjs";
 import { Button, Spinner } from "@heroui/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { Copy, LogOut, Send, Upload } from "lucide-react";
+import { ArrowDown, Copy, LogOut, Send, Upload } from "lucide-react";
 import { nanoid } from "nanoid";
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { VariableSizeList } from "react-window";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/")({
@@ -123,9 +130,7 @@ function LoginScreen({ onDone }: { onDone: () => void }) {
 
 function InboxScreen() {
   const queryClient = useQueryClient();
-  const [selectedDeviceId, setSelectedDeviceId] = useState<string>();
-  const [selectedDate, setSelectedDate] = useState<string>();
-  const timelineEnd = useRef<HTMLDivElement>(null);
+  const [loadedDayCount, setLoadedDayCount] = useState(2);
   const bootstrap = useQuery({
     queryKey: ["bootstrap"],
     queryFn: () => api<Bootstrap>("/api/bootstrap"),
@@ -135,28 +140,31 @@ function InboxScreen() {
   });
   const devices = bootstrap.data?.devices ?? [];
   const currentDevice = bootstrap.data?.currentDevice;
-  const activeDeviceId =
-    selectedDeviceId ?? currentDevice?.id ?? devices[0]?.id;
-  const dates = useMemo(() => recentDates(), []);
-  const activeDate = selectedDate ?? dates[0];
+  const loadedDates = useMemo(
+    () =>
+      Array.from({ length: loadedDayCount }, (_, index) => dateOffset(index)),
+    [loadedDayCount]
+  );
   const messages = useQuery({
-    enabled: Boolean(activeDeviceId),
-    queryKey: ["messages", activeDeviceId, activeDate],
-    queryFn: () =>
-      api<{ messages: Message[] }>(
-        `/api/messages?sourceDeviceId=${activeDeviceId}&localDate=${activeDate}&timezone=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`
-      ),
+    queryKey: ["messages", loadedDayCount],
+    queryFn: async () => {
+      const timezone = encodeURIComponent(
+        Intl.DateTimeFormat().resolvedOptions().timeZone
+      );
+      const pages = await Promise.all(
+        [...loadedDates]
+          .reverse()
+          .map((date) =>
+            api<{ messages: Message[] }>(
+              `/api/messages?localDate=${date}&timezone=${timezone}`
+            )
+          )
+      );
+      return { messages: pages.flatMap((page) => page.messages) };
+    },
     refetchInterval: 5000,
     refetchIntervalInBackground: false,
     placeholderData: (previous) => previous,
-  });
-  useEffect(() => {
-    if (!selectedDeviceId && currentDevice?.id) {
-      setSelectedDeviceId(currentDevice.id);
-    }
-  }, [currentDevice?.id, selectedDeviceId]);
-  useEffect(() => {
-    timelineEnd.current?.scrollIntoView({ block: "end" });
   });
   const signOut = useMutation({
     mutationFn: () => authApi("/api/auth/sign-out", { method: "POST" }),
@@ -164,12 +172,14 @@ function InboxScreen() {
   });
   return (
     <main className="flex h-screen bg-slate-100 text-slate-950">
-      <aside className="hidden w-72 border-slate-200 border-r bg-white md:block">
-        <div className="flex h-16 items-center justify-between border-slate-200 border-b px-4">
+      <section className="flex min-w-0 flex-1 flex-col">
+        <header className="flex min-h-16 items-center justify-between border-slate-200 border-b bg-white px-4 py-3">
           <div>
-            <div className="font-semibold">Devices</div>
+            <div className="font-semibold">Quick Send</div>
             <div className="text-slate-500 text-xs">
               {bootstrap.data?.user.email}
+              {currentDevice ? ` · ${currentDevice.displayName}` : ""}
+              {devices.length ? ` · ${devices.length} devices` : ""}
             </div>
           </div>
           <Button
@@ -180,112 +190,34 @@ function InboxScreen() {
           >
             <LogOut size={16} />
           </Button>
-        </div>
-        <div className="p-2">
-          {devices.map((device) => (
-            <button
-              className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-left ${
-                device.id === activeDeviceId
-                  ? "bg-blue-50 text-blue-700"
-                  : "hover:bg-slate-100"
-              }`}
-              key={device.id}
-              onClick={() => setSelectedDeviceId(device.id)}
-              type="button"
-            >
-              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-200 text-xs">
-                {device.displayName.slice(0, 2).toUpperCase()}
-              </span>
-              <span className="min-w-0 flex-1 truncate">
-                {device.displayName}
-              </span>
-            </button>
-          ))}
-        </div>
-      </aside>
-      <section className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-16 items-center justify-between border-slate-200 border-b bg-white px-4">
-          <div>
-            <div className="font-semibold">
-              {devices.find((device) => device.id === activeDeviceId)
-                ?.displayName ?? "Current device"}
-            </div>
-            <div className="text-slate-500 text-xs">
-              Source device conversation
-            </div>
-          </div>
         </header>
-        <div className="border-slate-200 border-b bg-white px-4 py-3 md:hidden">
-          <select
-            className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm outline-none focus:border-blue-500"
-            onChange={(event) => setSelectedDeviceId(event.currentTarget.value)}
-            value={activeDeviceId ?? ""}
-          >
-            {devices.map((device) => (
-              <option key={device.id} value={device.id}>
-                {device.displayName}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="border-slate-200 border-b bg-white px-4">
-          <div className="flex gap-2 overflow-x-auto">
-            {dates.map((date) => (
-              <button
-                className={`border-b-2 px-1 py-3 text-sm ${
-                  activeDate === date
-                    ? "border-blue-600 text-blue-700"
-                    : "border-transparent text-slate-500"
-                }`}
-                key={date}
-                onClick={() => setSelectedDate(date)}
-                type="button"
-              >
-                {dateLabel(date)}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        <div className="min-h-0 flex-1 overflow-hidden">
           {messages.isLoading ? (
             <FullScreenSpinner />
           ) : (
-            <div className="mx-auto flex max-w-3xl flex-col gap-3">
-              {(messages.data?.messages ?? []).map((message) => (
-                <MessageItem key={message.id} message={message} />
-              ))}
-              <div ref={timelineEnd} />
-              {messages.data?.messages.length === 0 ? (
-                <div className="pt-24 text-center text-slate-500">
-                  No messages yet
-                </div>
-              ) : null}
-            </div>
+            <MessageTimeline
+              isFetching={messages.isFetching}
+              messages={messages.data?.messages ?? []}
+              onLoadEarlier={() => setLoadedDayCount((count) => count + 1)}
+            />
           )}
         </div>
         <Composer
-          activeDate={activeDate}
-          activeDeviceId={activeDeviceId}
           disabled={!currentDevice}
           onSent={async (message) => {
             syncLog("invalidate_start", {
-              activeDeviceId,
-              activeDate,
               messageId: message?.id,
               messageLocalDate: message?.localDate,
               messageDeviceId: message?.senderDeviceId,
             });
             await queryClient.invalidateQueries({
-              queryKey: ["messages", activeDeviceId],
+              queryKey: ["messages"],
             });
             const cached = queryClient.getQueryData<{ messages: Message[] }>([
               "messages",
-              activeDeviceId,
-              activeDate,
+              loadedDayCount,
             ]);
             syncLog("invalidate_done", {
-              activeDeviceId,
-              activeDate,
               messageId: message?.id,
               cachedCount: cached?.messages.length,
               cachedHasMessage: Boolean(
@@ -300,11 +232,182 @@ function InboxScreen() {
   );
 }
 
+type TimelineItem =
+  | { id: string; type: "date"; date: string }
+  | { id: string; type: "message"; message: Message };
+
+function MessageTimeline({
+  isFetching,
+  messages,
+  onLoadEarlier,
+}: {
+  isFetching: boolean;
+  messages: Message[];
+  onLoadEarlier: () => void;
+}) {
+  const container = useRef<HTMLDivElement>(null);
+  const list = useRef<VariableSizeList>(null);
+  const heights = useRef<Record<string, number>>({});
+  const loadingEarlier = useRef(false);
+  const lastLatestId = useRef<string | undefined>(undefined);
+  const latestId = messages.at(-1)?.id;
+  const [height, setHeight] = useState(500);
+  const items = useMemo(() => timelineItems(messages), [messages]);
+  useEffect(() => {
+    const element = container.current;
+    if (!element) {
+      return;
+    }
+    const update = () => setHeight(element.getBoundingClientRect().height);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  useEffect(() => {
+    if (latestId && latestId !== lastLatestId.current) {
+      lastLatestId.current = latestId;
+      requestAnimationFrame(() => list.current?.scrollToItem(items.length - 1));
+    }
+  }, [items.length, latestId]);
+  useEffect(() => {
+    if (!isFetching) {
+      loadingEarlier.current = false;
+    }
+  }, [isFetching]);
+  const data = useMemo(
+    () => ({
+      items,
+      setHeight: (id: string, index: number, value: number) => {
+        if (heights.current[id] !== value) {
+          heights.current[id] = value;
+          list.current?.resetAfterIndex(index);
+        }
+      },
+    }),
+    [items]
+  );
+  if (!items.length) {
+    return (
+      <div className="pt-24 text-center text-slate-500">No messages yet</div>
+    );
+  }
+  return (
+    <div className="relative h-full px-4 py-3" ref={container}>
+      <VariableSizeList
+        className="[scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        height={height}
+        itemCount={items.length}
+        itemData={data}
+        itemKey={(index) => items[index]?.id ?? index}
+        itemSize={(index) => {
+          const item = items[index];
+          return item
+            ? (heights.current[item.id] ?? defaultItemHeight(item))
+            : 80;
+        }}
+        onScroll={({ scrollOffset }) => {
+          if (scrollOffset < 80 && !(isFetching || loadingEarlier.current)) {
+            loadingEarlier.current = true;
+            onLoadEarlier();
+          }
+        }}
+        ref={list}
+        width="100%"
+      >
+        {TimelineRow}
+      </VariableSizeList>
+      <Button
+        aria-label="Scroll to bottom"
+        className="absolute right-5 bottom-5 z-10 shadow-sm"
+        isIconOnly
+        onPress={() => list.current?.scrollToItem(items.length - 1, "end")}
+        size="sm"
+        variant="primary"
+      >
+        <ArrowDown size={16} />
+      </Button>
+    </div>
+  );
+}
+
+function TimelineRow({
+  data,
+  index,
+  style,
+}: {
+  data: {
+    items: TimelineItem[];
+    setHeight: (id: string, index: number, value: number) => void;
+  };
+  index: number;
+  style: CSSProperties;
+}) {
+  const element = useRef<HTMLDivElement>(null);
+  const item = data.items[index];
+  useEffect(() => {
+    const node = element.current;
+    if (!(node && item)) {
+      return;
+    }
+    const update = () =>
+      data.setHeight(
+        item.id,
+        index,
+        Math.ceil(node.getBoundingClientRect().height) + 16
+      );
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [data, index, item]);
+  if (!item) {
+    return null;
+  }
+  return (
+    <div style={style}>
+      <div className="mx-auto max-w-3xl pb-3" ref={element}>
+        {item.type === "date" ? (
+          <div className="flex items-center justify-center py-3">
+            <span className="rounded-full bg-slate-200 px-3 py-1 text-slate-600 text-xs">
+              {dateLabel(item.date)}
+            </span>
+          </div>
+        ) : (
+          <MessageItem message={item.message} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function timelineItems(messages: Message[]): TimelineItem[] {
+  const items: TimelineItem[] = [];
+  let currentDate = "";
+  for (const message of messages) {
+    if (message.localDate !== currentDate) {
+      currentDate = message.localDate;
+      items.push({
+        id: `date-${currentDate}`,
+        type: "date",
+        date: currentDate,
+      });
+    }
+    items.push({ id: message.id, type: "message", message });
+  }
+  return items;
+}
+
+function defaultItemHeight(item: TimelineItem) {
+  return item.type === "date" ? 44 : 180;
+}
+
 function MessageItem({ message }: { message: Message }) {
   const content = messageContent(message);
   return (
     <article className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-      <div className="mb-2 flex items-center justify-end gap-1 text-slate-500 text-xs">
+      <div className="mb-2 flex items-center justify-between gap-3 text-slate-500 text-xs">
+        <span className="truncate">{message.senderDeviceNameSnapshot}</span>
         <span>{new Date(message.createdAt).toLocaleTimeString()}</span>
         {message.kind === "text" && message.body ? (
           <Button
@@ -335,6 +438,7 @@ function messageContent(message: Message) {
   }
   return (
     <a
+      className="flex justify-center"
       href={`/api/images/${message.image.id}?size=original`}
       rel="noreferrer"
       target="_blank"
@@ -358,13 +462,9 @@ async function copyMessageText(text: string) {
 }
 
 function Composer({
-  activeDate,
-  activeDeviceId,
   disabled,
   onSent,
 }: {
-  activeDate: string | undefined;
-  activeDeviceId: string | undefined;
   disabled: boolean;
   onSent: (message?: Message) => void | Promise<void>;
 }) {
@@ -387,8 +487,6 @@ function Composer({
     mutationFn: async (file: File) => {
       const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
       syncLog("image_upload_start", {
-        activeDeviceId,
-        activeDate,
         name: file.name,
         size: file.size,
         type: file.type,
@@ -422,8 +520,6 @@ function Composer({
       }
       const payload = (await response.json()) as { message: Message };
       syncLog("image_upload_done", {
-        activeDeviceId,
-        activeDate,
         messageId: payload.message.id,
         messageLocalDate: payload.message.localDate,
         messageDeviceId: payload.message.senderDeviceId,
@@ -619,12 +715,10 @@ async function previousDeviceId() {
   return previous && previous !== current ? previous : undefined;
 }
 
-function recentDates() {
-  return Array.from({ length: 7 }, (_, index) => {
-    const date = new Date();
-    date.setDate(date.getDate() - index);
-    return date.toISOString().slice(0, 10);
-  });
+function dateOffset(daysAgo: number) {
+  const date = new Date();
+  date.setDate(date.getDate() - daysAgo);
+  return date.toISOString().slice(0, 10);
 }
 
 function dateLabel(date: string) {

@@ -131,14 +131,10 @@ app.get("/api/messages", async (context) => {
   const sourceDeviceId = context.req.query("sourceDeviceId");
   const localDate = context.req.query("localDate");
   const timezone = context.req.query("timezone");
-  if (!sourceDeviceId) {
-    return context.json({ error: "sourceDeviceId is required" }, 400);
+  const filters = [eq(messages.userId, user.id), isNull(messages.deletedAt)];
+  if (sourceDeviceId) {
+    filters.push(eq(messages.senderDeviceId, sourceDeviceId));
   }
-  const filters = [
-    eq(messages.userId, user.id),
-    eq(messages.senderDeviceId, sourceDeviceId),
-    isNull(messages.deletedAt),
-  ];
   if (localDate) {
     filters.push(eq(messages.localDate, localDate));
   }
