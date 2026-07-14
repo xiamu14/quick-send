@@ -3,6 +3,7 @@ import { and, desc, eq, isNull, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { nanoid } from "nanoid";
+import { UAParser } from "ua-parser-js";
 import { createAuth } from "./auth";
 import {
   user as authUser,
@@ -23,11 +24,8 @@ const imageTypes = new Set([
 ]);
 const tabletPattern = /ipad|tablet/i;
 const mobilePattern = /mobile|iphone|android/i;
-const iphonePattern = /iphone/i;
-const ipadPattern = /ipad/i;
-const macPattern = /macintosh|mac os x/i;
-const windowsPattern = /windows/i;
-const androidPattern = /android/i;
+const legacyAppleDevicePattern = /^(iPhone|iPad|Mac)( \d+)?$/;
+const vivoModelPattern = /^V\d+[A-Z]?$/i;
 
 type Variables = {
   user: { id: string; email: string; name: string };
@@ -142,6 +140,7 @@ app.get("/api/messages", async (context) => {
     .select()
     .from(messages)
     .leftJoin(imageObjects, eq(messages.id, imageObjects.messageId))
+    .leftJoin(devices, eq(messages.senderDeviceId, devices.id))
     .where(and(...filters))
     .orderBy(desc(messages.createdAt))
     .limit(100);
@@ -157,6 +156,9 @@ app.get("/api/messages", async (context) => {
   return context.json({
     messages: rows.reverse().map((row) => ({
       ...row.messages,
+      senderDeviceNameSnapshot: legacyDeviceName(
+        row.devices?.displayName ?? row.messages.senderDeviceNameSnapshot
+      ),
       image: row.image_objects,
     })),
   });
@@ -431,12 +433,19 @@ async function ensureCurrentDevice(
     )
     .get();
   if (existing) {
+    const userAgent = context.req.header("user-agent") ?? "";
+    const displayName = await availableDeviceName(
+      db,
+      user.id,
+      inferDeviceName(userAgent),
+      existing.id
+    );
     await mergePreviousDevice(db, user.id, existing.id, previousDeviceIdHash);
     await db
       .update(devices)
-      .set({ lastSeenAt: now })
+      .set({ displayName, lastSeenAt: now })
       .where(eq(devices.id, existing.id));
-    return { ...existing, lastSeenAt: now };
+    return { ...existing, displayName, lastSeenAt: now };
   }
   const previous = previousDeviceIdHash
     ? await db
@@ -508,13 +517,18 @@ async function mergePreviousDevice(
 async function availableDeviceName(
   db: ReturnType<typeof drizzle<typeof schema>>,
   userId: string,
-  baseName: string
+  baseName: string,
+  ignoredDeviceId?: string
 ) {
   const rows = await db
-    .select({ displayName: devices.displayName })
+    .select({ id: devices.id, displayName: devices.displayName })
     .from(devices)
     .where(eq(devices.userId, userId));
-  const used = new Set(rows.map((row) => row.displayName.toLowerCase()));
+  const used = new Set(
+    rows
+      .filter((row) => row.id !== ignoredDeviceId)
+      .map((row) => row.displayName.toLowerCase())
+  );
   if (!used.has(baseName.toLowerCase())) {
     return baseName;
   }
@@ -533,32 +547,34 @@ function normalizeDeviceName(value: string | undefined) {
 }
 
 function inferDeviceKind(userAgent: string): DeviceKind {
-  if (tabletPattern.test(userAgent)) {
+  const type = UAParser(userAgent).device.type;
+  if (type === "tablet" || tabletPattern.test(userAgent)) {
     return "tablet";
   }
-  if (mobilePattern.test(userAgent)) {
+  if (type === "mobile" || mobilePattern.test(userAgent)) {
     return "mobile";
   }
   return "desktop";
 }
 
 function inferDeviceName(userAgent: string) {
-  if (iphonePattern.test(userAgent)) {
-    return "iPhone";
+  const device = UAParser(userAgent).device;
+  const vendor =
+    device.vendor === "Generic" &&
+    device.model &&
+    vivoModelPattern.test(device.model)
+      ? "Vivo"
+      : device.vendor;
+  return [vendor, device.model].filter(Boolean).join(" ") || "Device";
+}
+
+function legacyDeviceName(name: string) {
+  const match = legacyAppleDevicePattern.exec(name);
+  if (match) {
+    const model = match[1] === "Mac" ? "Macintosh" : match[1];
+    return `Apple ${model}${match[2] ?? ""}`;
   }
-  if (ipadPattern.test(userAgent)) {
-    return "iPad";
-  }
-  if (macPattern.test(userAgent)) {
-    return "Mac";
-  }
-  if (windowsPattern.test(userAgent)) {
-    return "Windows";
-  }
-  if (androidPattern.test(userAgent)) {
-    return "Android";
-  }
-  return "Device";
+  return vivoModelPattern.test(name) ? `Vivo ${name}` : name;
 }
 
 function localDate(date: Date, timezone: string | undefined) {

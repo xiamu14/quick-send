@@ -2,7 +2,7 @@ import FingerprintJS from "@fingerprintjs/fingerprintjs";
 import { Button, Spinner } from "@heroui/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { ArrowDown, Copy, LogOut, Send, Upload } from "lucide-react";
+import { ArrowDown, LogOut, Plus, Send } from "lucide-react";
 import { nanoid } from "nanoid";
 import {
   type CSSProperties,
@@ -138,7 +138,6 @@ function InboxScreen() {
     refetchIntervalInBackground: false,
     staleTime: 5000,
   });
-  const devices = bootstrap.data?.devices ?? [];
   const currentDevice = bootstrap.data?.currentDevice;
   const loadedDates = useMemo(
     () =>
@@ -174,12 +173,14 @@ function InboxScreen() {
     <main className="flex h-dvh overflow-hidden bg-slate-100 text-slate-950">
       <section className="flex min-w-0 flex-1 flex-col">
         <header className="flex min-h-16 items-center justify-between border-slate-200 border-b bg-white px-4 py-3">
-          <div>
-            <div className="font-semibold">Quick Send</div>
-            <div className="text-slate-500 text-xs">
-              {bootstrap.data?.user.email}
-              {currentDevice ? ` · ${currentDevice.displayName}` : ""}
-              {devices.length ? ` · ${devices.length} devices` : ""}
+          <div className="flex min-w-0 items-center gap-3">
+            <img alt="" className="h-9 w-9 shrink-0" src="/favicon.svg" />
+            <div className="min-w-0">
+              <div className="font-semibold leading-tight">Quick Send</div>
+              <div className="truncate text-slate-500 text-xs">
+                {bootstrap.data?.user.email}
+                {currentDevice ? ` · ${currentDevice.displayName}` : ""}
+              </div>
             </div>
           </div>
           <Button
@@ -317,16 +318,18 @@ function MessageTimeline({
       >
         {TimelineRow}
       </VariableSizeList>
-      <Button
-        aria-label="Scroll to bottom"
-        className="absolute right-5 bottom-5 z-10 shadow-sm"
-        isIconOnly
-        onPress={() => list.current?.scrollToItem(items.length - 1, "end")}
-        size="sm"
-        variant="primary"
-      >
-        <ArrowDown size={16} />
-      </Button>
+      <div className="pointer-events-none absolute inset-x-4 bottom-4 z-10 mx-auto flex max-w-3xl justify-end">
+        <Button
+          aria-label="Scroll to bottom"
+          className="pointer-events-auto h-8 w-8 min-w-8 bg-white text-blue-600 shadow-sm ring-1 ring-slate-200 data-[hover=true]:bg-blue-50"
+          isIconOnly
+          onPress={() => list.current?.scrollToItem(items.length - 1, "end")}
+          size="sm"
+          variant="ghost"
+        >
+          <ArrowDown size={16} />
+        </Button>
+      </div>
     </div>
   );
 }
@@ -368,7 +371,7 @@ function TimelineRow({
     <div style={style}>
       <div className="mx-auto max-w-3xl pb-3" ref={element}>
         {item.type === "date" ? (
-          <div className="flex items-center justify-center py-3">
+          <div className="flex items-center justify-center py-1">
             <span className="rounded-full bg-slate-200 px-3 py-1 text-slate-600 text-xs">
               {dateLabel(item.date)}
             </span>
@@ -399,27 +402,38 @@ function timelineItems(messages: Message[]): TimelineItem[] {
 }
 
 function defaultItemHeight(item: TimelineItem) {
-  return item.type === "date" ? 44 : 180;
+  return item.type === "date" ? 32 : 180;
 }
 
 function MessageItem({ message }: { message: Message }) {
   const content = messageContent(message);
+  const copyableText = message.kind === "text" ? message.body : null;
+  const header = (
+    <div className="mb-2 flex items-center justify-between gap-3 text-slate-500 text-xs">
+      <span className="truncate">{message.senderDeviceNameSnapshot}</span>
+      <span>
+        {new Date(message.createdAt).toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        })}
+      </span>
+    </div>
+  );
+  if (copyableText) {
+    return (
+      <button
+        className="w-full rounded-lg border border-slate-200 bg-white p-3 text-left shadow-sm"
+        onClick={() => copyMessageText(copyableText)}
+        type="button"
+      >
+        {header}
+        {content}
+      </button>
+    );
+  }
   return (
     <article className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-      <div className="mb-2 flex items-center justify-between gap-3 text-slate-500 text-xs">
-        <span className="truncate">{message.senderDeviceNameSnapshot}</span>
-        <span>{new Date(message.createdAt).toLocaleTimeString()}</span>
-        {message.kind === "text" && message.body ? (
-          <Button
-            isIconOnly
-            onPress={() => copyMessageText(message.body ?? "")}
-            size="sm"
-            variant="ghost"
-          >
-            <Copy size={14} />
-          </Button>
-        ) : null}
-      </div>
+      {header}
       {content}
     </article>
   );
@@ -453,11 +467,51 @@ function messageContent(message: Message) {
 }
 
 async function copyMessageText(text: string) {
+  syncLog("copy_start", {
+    length: text.length,
+    hasClipboard: Boolean(navigator.clipboard),
+    hasWriteText: Boolean(navigator.clipboard?.writeText),
+    isSecureContext: window.isSecureContext,
+  });
   try {
-    await navigator.clipboard.writeText(text);
+    const permission = await navigator.permissions?.query({
+      name: "clipboard-write" as PermissionName,
+    });
+    syncLog("copy_permission", { state: permission?.state });
+  } catch (error) {
+    syncLog("copy_permission_error", {
+      name: error instanceof Error ? error.name : undefined,
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      copyTextWithSelection(text);
+    }
+    syncLog("copy_done");
     toast.success("Copied");
-  } catch {
+  } catch (error) {
+    syncLog("copy_error", {
+      name: error instanceof Error ? error.name : undefined,
+      message: error instanceof Error ? error.message : String(error),
+    });
     toast.error("Copy failed");
+  }
+}
+
+function copyTextWithSelection(text: string) {
+  const input = document.createElement("textarea");
+  input.value = text;
+  input.style.position = "fixed";
+  input.style.opacity = "0";
+  document.body.append(input);
+  input.select();
+  const copied = document.execCommand("copy");
+  input.remove();
+  if (!copied) {
+    throw new Error("document.execCommand copy returned false");
   }
 }
 
@@ -535,21 +589,14 @@ function Composer({
     },
   });
   return (
-    <footer className="border-slate-200 border-t bg-white px-3 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
-      <div className="mx-auto flex max-w-3xl items-end gap-2">
-        <textarea
-          className="max-h-32 min-h-10 flex-1 resize-none rounded-md border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-500"
-          onChange={(event) => setBody(event.currentTarget.value)}
-          placeholder="Send text to your devices"
-          rows={1}
-          value={body}
-        />
+    <footer className="bg-slate-100 px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
+      <div className="mx-auto flex max-w-3xl items-center gap-2 rounded-full bg-white px-3 py-1.5 shadow-sm ring-1 ring-slate-200">
         <label
-          className={`grid h-10 w-10 place-items-center rounded-md border border-slate-200 ${
+          className={`grid h-8 shrink-0 place-items-center rounded-full text-slate-900 ${
             disabled || image.isPending ? "opacity-50" : "cursor-pointer"
           }`}
         >
-          <Upload size={18} />
+          <Plus size={18} />
           <input
             accept="image/jpeg,image/png,image/webp,image/gif"
             className="hidden"
@@ -563,13 +610,22 @@ function Composer({
             type="file"
           />
         </label>
+        <textarea
+          className="max-h-24 min-h-8 flex-1 resize-none bg-transparent px-0 py-1.5 text-sm outline-none placeholder:text-slate-400"
+          onChange={(event) => setBody(event.currentTarget.value)}
+          placeholder="Send text to your devices"
+          rows={1}
+          value={body}
+        />
         <Button
+          className="h-7 w-7 min-w-7 shrink-0 bg-transparent text-blue-600 data-[hover=true]:bg-blue-50"
           isDisabled={disabled || !body.trim()}
           isIconOnly
           onPress={() => text.mutate()}
-          variant="primary"
+          size="sm"
+          variant="ghost"
         >
-          <Send size={18} />
+          <Send size={17} />
         </Button>
       </div>
     </footer>

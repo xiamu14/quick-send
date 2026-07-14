@@ -1,4 +1,5 @@
 import { nanoid } from "nanoid";
+import { UAParser } from "ua-parser-js";
 import type { DeviceKind, User } from "@/shared/types";
 import { hashToken, randomToken } from "./crypto";
 import type { AppDatabase } from "./db";
@@ -7,16 +8,7 @@ const credentialMaxIdleMs = 90 * 24 * 60 * 60 * 1000;
 const shortIdAlphabet = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 const tabletPattern = /ipad|tablet/i;
 const mobilePattern = /mobile|iphone|android/i;
-const androidPattern = /android/i;
-const androidModelPattern = /android[^;)]*;\s*([^;)]+?)(?:\s+build\/|[;)])/i;
-const androidBrandPattern =
-  /\b(vivo|oppo|oneplus|xiaomi|redmi|huawei|honor|samsung|realme|pixel)\b/i;
-const iphonePattern = /iphone/i;
-const ipadPattern = /ipad/i;
-const macPattern = /macintosh|mac os x/i;
-const windowsPattern = /windows/i;
-const linuxPattern = /linux/i;
-const localePrefixPattern = /^[a-z]{2}[-_][a-z]{2};\s*/i;
+const vivoModelPattern = /^V\d+[A-Z]?$/i;
 
 export type IdentityResult = {
   user: User;
@@ -25,43 +17,25 @@ export type IdentityResult = {
 type IdentitySource = "browser" | "device";
 
 export function deviceKindFromUserAgent(userAgent: string): DeviceKind {
-  if (tabletPattern.test(userAgent)) {
+  const type = UAParser(userAgent).device.type;
+  if (type === "tablet" || tabletPattern.test(userAgent)) {
     return "tablet";
   }
-  if (mobilePattern.test(userAgent)) {
+  if (type === "mobile" || mobilePattern.test(userAgent)) {
     return "mobile";
   }
   return "desktop";
 }
 
 export function deviceNameFromUserAgent(userAgent: string) {
-  if (iphonePattern.test(userAgent)) {
-    return "iPhone";
-  }
-  if (ipadPattern.test(userAgent)) {
-    return "iPad";
-  }
-  if (macPattern.test(userAgent)) {
-    return "Mac OS";
-  }
-  if (windowsPattern.test(userAgent)) {
-    return "Windows";
-  }
-  if (androidPattern.test(userAgent)) {
-    const brand = userAgent.match(androidBrandPattern)?.[1];
-    const model = userAgent
-      .match(androidModelPattern)?.[1]
-      ?.replace(localePrefixPattern, "")
-      .trim();
-    if (brand && model && !model.toLowerCase().includes(brand.toLowerCase())) {
-      return `${brand} ${model}`;
-    }
-    return model || (brand ? `${brand} Android` : "Android");
-  }
-  if (linuxPattern.test(userAgent)) {
-    return "Linux";
-  }
-  return "Unknown device";
+  const device = UAParser(userAgent).device;
+  const vendor =
+    device.vendor === "Generic" &&
+    device.model &&
+    vivoModelPattern.test(device.model)
+      ? "Vivo"
+      : device.vendor;
+  return [vendor, device.model].filter(Boolean).join(" ") || "Unknown device";
 }
 
 export async function ensureIdentity(

@@ -37,13 +37,17 @@ describe("identity", () => {
   test.each([
     [
       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-      "Mac OS",
+      "Apple Macintosh",
     ],
     [
       "Mozilla/5.0 (Linux; Android 14; vivo V2338A Build/UP1A) AppleWebKit/537.36 Mobile",
-      "vivo V2338A",
+      "Vivo V2338A",
     ],
-    ["Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)", "iPhone"],
+    [
+      "Mozilla/5.0 (Linux; Android 15; V2509A) AppleWebKit/537.36 Mobile",
+      "Vivo V2509A",
+    ],
+    ["Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)", "Apple iPhone"],
   ])("extracts a readable device name from UA", (userAgent, expected) => {
     expect(deviceNameFromUserAgent(userAgent)).toBe(expected);
   });
