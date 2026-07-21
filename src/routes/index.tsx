@@ -441,7 +441,11 @@ function MessageItem({ message }: { message: Message }) {
 
 function messageContent(message: Message) {
   if (message.kind === "text") {
-    return <p className="whitespace-pre-wrap text-sm">{message.body}</p>;
+    return (
+      <p className="whitespace-pre-wrap text-sm [overflow-wrap:anywhere]">
+        {message.body}
+      </p>
+    );
   }
   if (!message.image) {
     return (
@@ -657,11 +661,7 @@ function syncDebugEnabled() {
   }
   try {
     const params = new URLSearchParams(window.location.search);
-    if (params.get("debug") === "true") {
-      window.localStorage.setItem("quick-send.debug", "true");
-      return true;
-    }
-    return window.localStorage.getItem("quick-send.debug") === "true";
+    return params.get("debug") === "true";
   } catch {
     return false;
   }

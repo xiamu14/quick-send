@@ -552,7 +552,7 @@ function MessageRow({
   if (message.kind === "text") {
     content = (
       <motion.button
-        className={`group relative whitespace-pre-wrap rounded-2xl px-4 py-3 text-left text-[15px] leading-6 shadow-sm ${
+        className={`group relative whitespace-pre-wrap rounded-2xl px-4 py-3 text-left text-[15px] leading-6 shadow-sm [overflow-wrap:anywhere] ${
           self
             ? "bg-accent text-accent-foreground"
             : "border border-default-100 bg-white text-foreground"

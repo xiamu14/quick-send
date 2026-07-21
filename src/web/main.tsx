@@ -21,11 +21,7 @@ function debugEnabled() {
   }
   try {
     const params = new URLSearchParams(window.location.search);
-    if (params.get("debug") === "true") {
-      window.localStorage.setItem("quick-send.debug", "true");
-      return true;
-    }
-    return window.localStorage.getItem("quick-send.debug") === "true";
+    return params.get("debug") === "true";
   } catch {
     return false;
   }
